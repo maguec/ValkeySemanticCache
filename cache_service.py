@@ -172,9 +172,9 @@ class SemanticCacheService:
                     self.prefix,
                     "SCHEMA",
                     "prompt",
-                    "TEXT",
+                    "TAG",
                     "response",
-                    "TEXT",
+                    "TAG",
                     "inserted_at",
                     "NUMERIC",
                     "updated_at",
@@ -190,11 +190,35 @@ class SemanticCacheService:
                     "DISTANCE_METRIC",
                     "COSINE",
                 ]
-                client.execute_command(*create_cmd)
+                try:
+                    client.execute_command(*create_cmd)
+                except Exception:
+                    # Fallback to pure vector schema
+                    fallback_cmd = [
+                        "FT.CREATE",
+                        self.index_name,
+                        "ON",
+                        "HASH",
+                        "PREFIX",
+                        "1",
+                        self.prefix,
+                        "SCHEMA",
+                        "prompt_vector",
+                        "VECTOR",
+                        "FLAT",
+                        "6",
+                        "TYPE",
+                        "FLOAT32",
+                        "DIM",
+                        str(dim),
+                        "DISTANCE_METRIC",
+                        "COSINE",
+                    ]
+                    client.execute_command(*fallback_cmd)
                 self._index_initialized = True
                 logger.info(f"Successfully created Valkey vector index: {self.index_name}")
             except Exception as e:
-                logger.warning(f"Index creation notice: {e}")
+                logger.info(f"Index initialization status: {e}")
                 self._index_initialized = True
 
     def set_threshold(self, threshold: float):

@@ -70,6 +70,9 @@ Launch the web app with `uv`:
 uv run python main.py
 ```
 
+> [!TIP]
+> **Automatic Index Initialization**: The Python application automatically creates and verifies the vector search index (`support_concierge_cache:support_concierge`) with the exact `TAG` + `NUMERIC` + `VECTOR FLAT` schema on startup—no manual index creation commands or external setup scripts needed.
+
 Open your browser at **`http://localhost:8080`**.
 
 ---

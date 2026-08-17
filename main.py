@@ -44,7 +44,8 @@ def index():
     ui.colors(primary="#1976D2", secondary="#26A69A", accent="#9C27B0", dark="#121824")
     ui.query("body").style("background-color: #0f172a; color: #f8fafc; font-family: Inter, system-ui, sans-serif;")
 
-    # Check connection statuses on load
+    # Automatically ensure Valkey index is created on startup
+    service.ensure_index_created()
     valkey_connected, valkey_msg = service.test_valkey_connection()
     vertex_connected, vertex_msg = service.test_vertex_connection()
 
