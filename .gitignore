@@ -12,3 +12,5 @@ wheels/
 # Environment variables & secrets
 .env
 
+# Keep prompts local
+GEMINI.md
