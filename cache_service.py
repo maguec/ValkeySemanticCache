@@ -65,6 +65,20 @@ class SemanticCacheService:
     def get_redis_client(self, decode_responses: bool = False) -> redis.Redis:
         """Get or initialize raw or text Redis/Valkey client."""
         url = self.config.get_redis_connection_url()
+        is_ssl = url.startswith("rediss://") or self.config.valkey_ssl
+
+        # NOTE: Disabling TLS certificate validation (ssl_cert_reqs=ssl.CERT_NONE and ssl_check_hostname=False)
+        # allows connecting to self-signed or POC Valkey nodes over TLS without installing local CA certs.
+        # WARNING: It is probably NOT best to disable TLS certificate verification in production environments.
+        # In production, ensure valid CA-signed certificates and hostname verification are enforced.
+        ssl_kwargs = {}
+        if is_ssl:
+            import ssl
+            ssl_kwargs = {
+                "ssl_cert_reqs": ssl.CERT_NONE,
+                "ssl_check_hostname": False,
+            }
+
         if decode_responses:
             if self._text_client is None:
                 self._text_client = redis.Redis.from_url(
@@ -72,6 +86,7 @@ class SemanticCacheService:
                     decode_responses=True,
                     socket_timeout=5.0,
                     socket_connect_timeout=5.0,
+                    **ssl_kwargs,
                 )
             return self._text_client
         else:
@@ -81,6 +96,7 @@ class SemanticCacheService:
                     decode_responses=False,
                     socket_timeout=5.0,
                     socket_connect_timeout=5.0,
+                    **ssl_kwargs,
                 )
             return self._raw_client
 
