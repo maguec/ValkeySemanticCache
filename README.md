@@ -4,6 +4,34 @@ An interactive Proof-of-Concept demonstrating **LangChain's RedisSemanticCache**
 
 ---
 
+## Why Semantic Caching
+
+While caching database results has been a very common way to lower costs and dramatically improve latency, it requires an exact match of the query which works well for templatized queries.  This does not translate well into the world of natural language.
+
+Semantic caching will look at the actual content of the natural language question and search the cache for similar questions.
+
+For example:
+
+- How do I reset my account password?
+- How can I recover my credentials?
+
+While obvious to any human that these are the same question by looking at the meaning of the words, this would not work with older methods.  The semantic cache attempts to find questions already answered that are similar.
+
+The caching then can dramatically lower the costs and lantency of serving commonly asked questions.
+
+## When to implement 
+
+You should implement semantic caching if:
+- The token cost to answer questions is high
+- The latency of those costs is high
+- The questions asked are often very similar
+
+
+You should *NOT* implement semantic caching if:
+- The questions being asked are unique - In my experience this is almost never the case despite what most people think.
+- Token costs are low and the LLM latency is low
+
+
 ## 🎯 Architecture & How It Works
 
 ```
@@ -37,6 +65,11 @@ An interactive Proof-of-Concept demonstrating **LangChain's RedisSemanticCache**
 
 ### 1. Configure Environment Variables (`.env`)
 
+Have a working Valkey server with search enabled.
+If you do not have one [this is how to spin one up on Google Cloud](./GCP-Setup.md)
+
+### 2. Configure Environment Variables (`.env`)
+
 Copy `.env.example` to `.env` and fill in your remote Valkey credentials and GCP project:
 
 ```bash
@@ -54,7 +87,7 @@ SEMANTIC_CACHE_DISTANCE_THRESHOLD=0.20
 SEMANTIC_CACHE_TTL=3600
 ```
 
-### 2. Google Cloud Authentication
+### 3. Google Cloud Authentication
 
 Ensure you are authenticated to Google Cloud with Application Default Credentials:
 
@@ -62,7 +95,7 @@ Ensure you are authenticated to Google Cloud with Application Default Credential
 gcloud auth application-default login
 ```
 
-### 3. Run the NiceGUI Application
+### 4. Run the NiceGUI Application
 
 Launch the web app with `uv`:
 
