@@ -46,9 +46,9 @@ VALKEY_URL=redis://:YOUR_REMOTE_PASSWORD@your-valkey-host.example.com:6379/0
 # (Or with TLS/SSL if your remote Valkey requires rediss://)
 # VALKEY_URL=rediss://:YOUR_REMOTE_PASSWORD@your-valkey-host.example.com:6380/0
 
-GOOGLE_CLOUD_PROJECT=mague-tf
-GOOGLE_CLOUD_LOCATION=us-central1
-VERTEXAI_MODEL=gemini-1.5-flash
+GOOGLE_CLOUD_PROJECT=MYPROJECT
+GOOGLE_CLOUD_LOCATION=us-west1
+VERTEXAI_MODEL=gemini-2.5-flash
 VERTEXAI_EMBEDDING_MODEL=text-embedding-004
 SEMANTIC_CACHE_DISTANCE_THRESHOLD=0.20
 SEMANTIC_CACHE_TTL=3600
