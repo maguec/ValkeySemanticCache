@@ -32,6 +32,7 @@ class AppConfig:
     cache_index_name: str = os.getenv("SEMANTIC_CACHE_INDEX_NAME", "support_concierge_cache")
     cache_prefix: str = os.getenv("SEMANTIC_CACHE_PREFIX", "support_concierge")
     cache_leaderboard_key: str = os.getenv("SEMANTIC_CACHE_LEADERBOARD_KEY", "")
+    cache_telemetry_key: str = os.getenv("SEMANTIC_CACHE_TELEMETRY_KEY", "")
     distance_threshold: float = float(os.getenv("SEMANTIC_CACHE_DISTANCE_THRESHOLD", "0.20"))
     cache_ttl: int = int(os.getenv("SEMANTIC_CACHE_TTL", "3600"))
 

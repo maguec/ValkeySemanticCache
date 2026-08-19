@@ -68,6 +68,7 @@ class SemanticCacheService:
         self.index_name = f"{config.cache_index_name}:{config.cache_prefix}"
         self.prefix = f"{self.index_name}:"
         self.leaderboard_key = config.cache_leaderboard_key or f"{self.prefix}leaderboard"
+        self.telemetry_key = config.cache_telemetry_key or f"{self.prefix}telemetry"
         self._raw_client: Optional[redis.Redis] = None
         self._text_client: Optional[redis.Redis] = None
         self._embeddings: Optional[GoogleGenerativeAIEmbeddings] = None
@@ -313,6 +314,9 @@ class SemanticCacheService:
                         hit_count = self.record_cache_hit(hit_key_str)
 
                         elapsed_ms = (time.perf_counter() - start_time) * 1000.0
+                        # Persist telemetry metrics in Valkey HASH
+                        self.record_telemetry(is_cache_hit=True, latency_ms=elapsed_ms, tokens_saved=250)
+
                         return QueryResult(
                             answer=cached_resp,
                             is_cache_hit=True,
@@ -367,6 +371,9 @@ class SemanticCacheService:
         c_tokens = usage.get("output_tokens", int(len(answer_text.split()) * 1.3))
         t_tokens = usage.get("total_tokens", p_tokens + c_tokens)
 
+        # Persist telemetry metrics in Valkey HASH
+        self.record_telemetry(is_cache_hit=False, latency_ms=elapsed_ms, tokens_saved=0)
+
         return QueryResult(
             answer=answer_text,
             is_cache_hit=False,
@@ -378,6 +385,92 @@ class SemanticCacheService:
             completion_tokens=c_tokens,
             total_tokens=t_tokens,
         )
+
+    def record_telemetry(
+        self,
+        is_cache_hit: bool,
+        latency_ms: float,
+        tokens_saved: int = 250,
+        baseline_latency_ms: float = 1200.0,
+    ) -> Dict[str, Any]:
+        """
+        Record and persist a query's telemetry metrics into a dedicated Valkey HASH.
+        Returns the updated telemetry dictionary.
+        """
+        saved_ms = max(0.0, baseline_latency_ms - latency_ms) if is_cache_hit else 0.0
+        tokens = tokens_saved if is_cache_hit else 0
+        speedup = (baseline_latency_ms / max(latency_ms, 1.0)) if is_cache_hit else 1.0
+
+        try:
+            client = self.get_redis_client(decode_responses=True)
+            pipe = client.pipeline()
+            pipe.hincrby(self.telemetry_key, "total_queries", 1)
+            if is_cache_hit:
+                pipe.hincrby(self.telemetry_key, "cache_hits", 1)
+                if tokens > 0:
+                    pipe.hincrby(self.telemetry_key, "tokens_saved", tokens)
+                if saved_ms > 0:
+                    pipe.hincrbyfloat(self.telemetry_key, "total_time_saved_ms", round(saved_ms, 2))
+            else:
+                pipe.hincrby(self.telemetry_key, "cache_misses", 1)
+
+            pipe.hset(
+                self.telemetry_key,
+                mapping={
+                    "last_latency_ms": str(round(latency_ms, 2)),
+                    "last_was_hit": "1" if is_cache_hit else "0",
+                    "last_speedup": str(round(speedup, 2)),
+                },
+            )
+            pipe.execute()
+        except Exception as e:
+            logger.warning(f"Failed to persist telemetry in Valkey HASH: {e}")
+
+        return self.get_telemetry()
+
+    def get_telemetry(self) -> Dict[str, Any]:
+        """
+        Retrieve persisted telemetry metrics from the Valkey HASH.
+        Returns default zeroed metrics if no entries exist yet.
+        """
+        defaults = {
+            "total_queries": 0,
+            "cache_hits": 0,
+            "cache_misses": 0,
+            "tokens_saved": 0,
+            "total_time_saved_ms": 0.0,
+            "last_latency_ms": 0.0,
+            "last_was_hit": False,
+            "last_speedup": 1.0,
+        }
+        try:
+            client = self.get_redis_client(decode_responses=True)
+            data = client.hgetall(self.telemetry_key)
+            if not data:
+                return defaults
+            return {
+                "total_queries": int(data.get("total_queries", 0)),
+                "cache_hits": int(data.get("cache_hits", 0)),
+                "cache_misses": int(data.get("cache_misses", 0)),
+                "tokens_saved": int(data.get("tokens_saved", 0)),
+                "total_time_saved_ms": float(data.get("total_time_saved_ms", 0.0)),
+                "last_latency_ms": float(data.get("last_latency_ms", 0.0)),
+                "last_was_hit": data.get("last_was_hit", "0") in ("1", "true", "True"),
+                "last_speedup": float(data.get("last_speedup", 1.0)),
+            }
+        except Exception as e:
+            logger.warning(f"Error fetching telemetry from Valkey: {e}")
+            return defaults
+
+    def reset_telemetry(self) -> bool:
+        """Reset telemetry metrics stored in the Valkey HASH."""
+        try:
+            client = self.get_redis_client(decode_responses=True)
+            client.delete(self.telemetry_key)
+            return True
+        except Exception as e:
+            logger.warning(f"Error resetting telemetry in Valkey: {e}")
+            return False
 
     def record_cache_hit(self, key_str: str) -> int:
         """
@@ -437,6 +530,9 @@ class SemanticCacheService:
             keys = client.keys(pattern)
 
             for key in keys:
+                # Exclude internal telemetry and leaderboard keys
+                if key == self.telemetry_key or key == self.leaderboard_key:
+                    continue
                 key_type = client.type(key)
                 ttl = client.ttl(key)
                 if key_type == "hash":
@@ -466,14 +562,16 @@ class SemanticCacheService:
             logger.warning(f"Error deleting cache entry {key}: {e}")
             return False
 
-    def clear_cache(self) -> bool:
-        """Clear all entries in the semantic cache and reset leaderboard sorted set."""
+    def clear_cache(self, clear_telemetry: bool = True) -> bool:
+        """Clear all entries in the semantic cache and reset leaderboard sorted set & telemetry."""
         try:
             client = self.get_redis_client(decode_responses=True)
             keys = client.keys(f"{self.prefix}*")
             if keys:
                 client.delete(*keys)
             client.delete(self.leaderboard_key)
+            if clear_telemetry:
+                client.delete(self.telemetry_key)
             return True
         except Exception as e:
             logger.error(f"Cache clear failed: {e}")

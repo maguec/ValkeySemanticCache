@@ -7,16 +7,6 @@ from cache_service import service, QueryResult
 
 # Application state
 chat_history: List[Dict[str, Any]] = []
-metrics = {
-    "total_queries": 0,
-    "cache_hits": 0,
-    "cache_misses": 0,
-    "tokens_saved": 0,
-    "total_time_saved_ms": 0.0,
-    "last_latency_ms": 0.0,
-    "last_was_hit": False,
-    "last_speedup": 1.0,
-}
 
 # Pre-populated test scenario variations
 SCENARIOS = {
@@ -157,7 +147,12 @@ def index():
                     with ui.row().classes("items-center gap-2"):
                         ui.icon("analytics", size="22px").classes("text-emerald-400")
                         ui.label("Live Telemetry HUD").classes("text-base font-semibold text-white")
-                    ui.label("Real-time performance").classes("text-xs text-slate-400")
+                    with ui.row().classes("items-center gap-1"):
+                        ui.label("Valkey HASH").classes("text-[10px] text-emerald-400 bg-emerald-950/70 px-1.5 py-0.5 rounded border border-emerald-700/50 font-mono")
+                        ui.button(
+                            icon="restart_alt",
+                            on_click=lambda: reset_telemetry_handler(),
+                        ).props("flat round dense color=slate-400 size=xs").tooltip("Reset telemetry metrics in Valkey HASH")
 
                 # 4-Grid KPI Counters
                 with ui.grid(columns=2).classes("w-full gap-3 pt-2"):
@@ -255,21 +250,32 @@ def index():
     # HELPER FUNCTIONS
     # -------------------------------------------------------------
     def refresh_telemetry():
-        total = metrics["total_queries"]
-        hits = metrics["cache_hits"]
+        t = service.get_telemetry()
+        total = t["total_queries"]
+        hits = t["cache_hits"]
         ratio = (hits / total * 100.0) if total > 0 else 0.0
         total_lbl.text = str(total)
         hit_ratio_lbl.text = f"{ratio:.0f}%"
-        time_saved_lbl.text = f"{(metrics['total_time_saved_ms'] / 1000.0):.1f}s"
-        tokens_saved_lbl.text = f"{metrics['tokens_saved']:,}"
+        time_saved_lbl.text = f"{(t['total_time_saved_ms'] / 1000.0):.1f}s"
+        tokens_saved_lbl.text = f"{t['tokens_saved']:,}"
 
-        if metrics["last_was_hit"]:
-            last_status_lbl.text = f"⚡ CACHE HIT ({metrics['last_speedup']:.0f}x Speedup)"
+        if total == 0:
+            last_status_lbl.text = "Ready for queries"
+            last_status_lbl.classes(replace="text-xs font-semibold text-slate-300")
+            last_latency_lbl.text = "-"
+        elif t["last_was_hit"]:
+            last_status_lbl.text = f"⚡ CACHE HIT ({t['last_speedup']:.0f}x Speedup)"
             last_status_lbl.classes(replace="text-xs font-semibold text-emerald-400")
+            last_latency_lbl.text = f"{t['last_latency_ms']:.1f} ms"
         else:
             last_status_lbl.text = "🔴 CACHE MISS (Invoked Gemini)"
             last_status_lbl.classes(replace="text-xs font-semibold text-amber-400")
-        last_latency_lbl.text = f"{metrics['last_latency_ms']:.1f} ms"
+            last_latency_lbl.text = f"{t['last_latency_ms']:.1f} ms"
+
+    def reset_telemetry_handler():
+        service.reset_telemetry()
+        ui.notify("Valkey Telemetry Metrics Reset!", type="info", position="top-right")
+        refresh_telemetry()
 
     def refresh_leaderboard():
         leaderboard_container.clear()
@@ -329,6 +335,7 @@ def index():
                     ui.label(item["response"][:80] + ("..." if len(item["response"]) > 80 else "")).classes("text-[11px] text-slate-400")
 
     def refresh_all_valkey_views():
+        refresh_telemetry()
         refresh_leaderboard()
         refresh_cache_table()
 
@@ -349,8 +356,8 @@ def index():
             ui.notify("Failed to delete entry", type="negative", position="top-right")
 
     def purge_cache():
-        service.clear_cache()
-        ui.notify("Valkey Semantic Cache & Leaderboard Cleared!", type="warning", position="top-right")
+        service.clear_cache(clear_telemetry=True)
+        ui.notify("Valkey Semantic Cache, Leaderboard & Telemetry Cleared!", type="warning", position="top-right")
         refresh_all_valkey_views()
 
     async def run_prompt(prompt_text: str):
@@ -376,7 +383,7 @@ def index():
 
         chat_scroll.scroll_to(percent=1.0)
 
-        # Run query in background thread
+        # Run query in background thread (service.query automatically persists telemetry to Valkey HASH)
         try:
             res: QueryResult = await run.io_bound(service.query, clean_prompt)
         except Exception as e:
@@ -390,23 +397,6 @@ def index():
             return
 
         spinner_row.delete()
-
-        # Update global telemetry metrics
-        metrics["total_queries"] += 1
-        metrics["last_latency_ms"] = res.latency_ms
-        metrics["last_was_hit"] = res.is_cache_hit
-
-        if res.is_cache_hit:
-            metrics["cache_hits"] += 1
-            # Assuming baseline LLM latency is ~1200ms
-            saved_ms = max(0.0, 1200.0 - res.latency_ms)
-            metrics["total_time_saved_ms"] += saved_ms
-            metrics["tokens_saved"] += 250  # Average saved tokens
-            speedup = 1200.0 / max(res.latency_ms, 1.0)
-            metrics["last_speedup"] = speedup
-        else:
-            metrics["cache_misses"] += 1
-            metrics["last_speedup"] = 1.0
 
         # Render Concierge Response with Telemetry Badges
         with chat_container:
@@ -445,10 +435,9 @@ def index():
                         ui.label("Cached for subsequent queries").classes("text-[11px] text-slate-400 italic")
 
         chat_scroll.scroll_to(percent=1.0)
-        refresh_telemetry()
         refresh_all_valkey_views()
 
-    # Initial view population
+    # Initial view population (loads persisted telemetry from Valkey HASH)
     refresh_all_valkey_views()
 
 

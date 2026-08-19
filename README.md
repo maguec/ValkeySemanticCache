@@ -58,6 +58,7 @@ You should *NOT* implement semantic caching if:
 2. **Vector Similarity in Valkey**: It searches the remote Valkey index for cosine similarity against previously cached queries within the configured `distance_threshold` (e.g. `0.20`).
 3. **Cache Hit & Sorted Set Leaderboard**: Returns the response in milliseconds with **0 LLM tokens billed**, increments the cache key in a Valkey **Sorted Set (ZSET)** via `ZINCRBY`, and tracks prompt frequency on a live leaderboard by pulling the original prompt from the Valkey **HASH**.
 4. **Cache Miss**: Calls Vertex AI Gemini, delivers the response, and vector-stores the prompt-response pair in Valkey.
+5. **Persistent Telemetry**: All operational metrics (total queries, hits, misses, tokens saved, latency, speedup) are stored in an atomic Valkey **HASH**, persisting all metrics across application restarts.
 
 ---
 
