@@ -1,5 +1,6 @@
-import asyncio
+import time
 from typing import List, Dict, Any
+from fastapi.responses import JSONResponse
 from nicegui import ui, app, run
 
 from config import config
@@ -26,6 +27,30 @@ SCENARIOS = {
         ("Variation 2 (Hit)", "Is there a cap on API calls per second?"),
     ],
 }
+
+
+# -----------------------------------------------------------------
+# HEALTH CHECK ENDPOINT (/v1/health)
+# -----------------------------------------------------------------
+@app.get("/v1/health")
+def health_check():
+    """
+    Health check endpoint that verifies connectivity to Valkey using a PING command.
+    Returns HTTP 200 with latency details if healthy, or HTTP 503 if unreachable.
+    """
+    ok, latency_ms, msg = service.ping_valkey()
+    status_code = 200 if ok else 503
+    payload = {
+        "status": "healthy" if ok else "unhealthy",
+        "valkey": {
+            "connected": ok,
+            "ping": msg if ok else "FAILED",
+            "latency_ms": latency_ms,
+            "error": None if ok else msg,
+        },
+        "timestamp": time.time(),
+    }
+    return JSONResponse(status_code=status_code, content=payload)
 
 
 @ui.page("/")

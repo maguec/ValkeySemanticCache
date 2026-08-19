@@ -113,6 +113,24 @@ class SemanticCacheService:
                 )
             return self._raw_client
 
+    def ping_valkey(self) -> Tuple[bool, float, str]:
+        """
+        Ping the Valkey server to verify connectivity and measure latency.
+        Returns:
+            Tuple[bool, float, str]: (is_successful, latency_ms, message_or_error)
+        """
+        start = time.perf_counter()
+        try:
+            client = self.get_redis_client(decode_responses=True)
+            pong = client.ping()
+            latency_ms = (time.perf_counter() - start) * 1000.0
+            if pong:
+                return True, round(latency_ms, 2), "PONG"
+            return False, round(latency_ms, 2), "No response from Valkey ping"
+        except Exception as e:
+            latency_ms = (time.perf_counter() - start) * 1000.0
+            return False, round(latency_ms, 2), str(e)
+
     def test_valkey_connection(self) -> Tuple[bool, str]:
         """Test connection to remote Valkey server."""
         try:
