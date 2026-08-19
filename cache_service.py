@@ -145,11 +145,21 @@ class SemanticCacheService:
             return False, str(e)
 
     def test_vertex_connection(self) -> Tuple[bool, str]:
-        """Test connection to Vertex AI."""
+        """
+        Verify Vertex AI connectivity, authentication, and permissions with 0 token consumption
+        by fetching model metadata from Vertex AI Model Garden.
+        """
         try:
-            emb = self.get_embeddings()
-            vector = emb.embed_query("ping")
-            return True, f"Vertex AI Ready ({self.config.vertex_model}, {self.config.vertex_embedding_model}, dim={len(vector)})"
+            from google import genai
+            client = genai.Client(
+                vertexai=True,
+                project=self.config.gcp_project,
+                location=self.config.gcp_location,
+            )
+            # Query model metadata (0 tokens, verifies ADC, IAM permissions, and API accessibility)
+            model_info = client.models.get(model=self.config.vertex_model)
+            model_name = getattr(model_info, "name", self.config.vertex_model)
+            return True, f"Vertex AI Ready (0 tokens used • {self.config.vertex_model})"
         except Exception as e:
             return False, str(e)
 

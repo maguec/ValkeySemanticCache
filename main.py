@@ -35,18 +35,29 @@ SCENARIOS = {
 @app.get("/v1/health")
 def health_check():
     """
-    Health check endpoint that verifies connectivity to Valkey using a PING command.
+    Health check endpoint that verifies connectivity to Valkey using a PING command
+    and verifies Vertex AI authentication and permissions with 0 token consumption.
     Returns HTTP 200 with latency details if healthy, or HTTP 503 if unreachable.
     """
-    ok, latency_ms, msg = service.ping_valkey()
-    status_code = 200 if ok else 503
+    valkey_ok, valkey_latency_ms, valkey_msg = service.ping_valkey()
+    vertex_ok, vertex_msg = service.test_vertex_connection()
+
+    all_healthy = valkey_ok and vertex_ok
+    status_code = 200 if all_healthy else 503
+
     payload = {
-        "status": "healthy" if ok else "unhealthy",
+        "status": "healthy" if all_healthy else "unhealthy",
         "valkey": {
-            "connected": ok,
-            "ping": msg if ok else "FAILED",
-            "latency_ms": latency_ms,
-            "error": None if ok else msg,
+            "connected": valkey_ok,
+            "ping": valkey_msg if valkey_ok else "FAILED",
+            "latency_ms": valkey_latency_ms,
+            "error": None if valkey_ok else valkey_msg,
+        },
+        "vertex_ai": {
+            "connected": vertex_ok,
+            "status": vertex_msg if vertex_ok else "FAILED",
+            "tokens_consumed": 0,
+            "error": None if vertex_ok else vertex_msg,
         },
         "timestamp": time.time(),
     }
@@ -87,13 +98,13 @@ def index():
 
             # Vertex AI status chip
             if vertex_connected:
-                with ui.badge(color="primary").classes("px-3 py-1.5 text-xs flex items-center gap-1.5"):
-                    ui.icon("psychology", size="14px")
+                with ui.badge(color="positive").classes("px-3 py-1.5 text-xs flex items-center gap-1.5"):
+                    ui.icon("check_circle", size="14px")
                     ui.label(f"Vertex AI: {config.vertex_model}")
             else:
-                with ui.badge(color="warning").classes("px-3 py-1.5 text-xs flex items-center gap-1.5"):
-                    ui.icon("error", size="14px")
-                    ui.label("Vertex AI Offline")
+                with ui.badge(color="negative").classes("px-3 py-1.5 text-xs flex items-center gap-1.5"):
+                    ui.icon("warning", size="14px")
+                    ui.label(f"Vertex AI Offline ({config.vertex_model})")
 
     # -------------------------------------------------------------
     # PRESET TEST PROMPTS BAR
