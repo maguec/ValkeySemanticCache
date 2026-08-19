@@ -56,7 +56,7 @@ You should *NOT* implement semantic caching if:
 
 1. **Semantic Interception**: When a user asks a question, LangChain generates an embedding vector via `text-embedding-004`.
 2. **Vector Similarity in Valkey**: It searches the remote Valkey index for cosine similarity against previously cached queries within the configured `distance_threshold` (e.g. `0.20`).
-3. **Cache Hit**: Returns the response in milliseconds with **0 LLM tokens billed**.
+3. **Cache Hit & Sorted Set Leaderboard**: Returns the response in milliseconds with **0 LLM tokens billed**, increments the cache key in a Valkey **Sorted Set (ZSET)** via `ZINCRBY`, and tracks prompt frequency on a live leaderboard by pulling the original prompt from the Valkey **HASH**.
 4. **Cache Miss**: Calls Vertex AI Gemini, delivers the response, and vector-stores the prompt-response pair in Valkey.
 
 ---
@@ -117,6 +117,10 @@ Open your browser at **`http://localhost:8080`**.
    - The query and answer are now stored as a vector embedding in your remote Valkey instance.
 2. Click **"Variation 1 (Hit)"** or **"Variation 2 (Hit)"** with alternative phrasing:
    - Notice the instant ⚡ **CACHE HIT** response in **~8 ms** (~120x speedup).
-   - Check the **match percentage** (e.g. 94.2% match) and the expandable matched source query.
-3. Adjust the **Semantic Distance Threshold Slider** live to test strict vs loose matching.
-4. Inspect the **Valkey Cache Explorer** tab to view stored keys or purge the cache.
+   - Check the **match percentage** (e.g. 94.2% match), the expandable matched source query, and the **Hit counter badge**.
+3. Check the **🏆 Top Prompts (Leaderboard)** tab in the right panel:
+   - See the most frequently hit prompts dynamically ranked by Valkey **Sorted Set (ZSET)** hit count.
+   - Observe how the prompt text and answer preview are retrieved directly from the corresponding Valkey **HASH**.
+   - Click the play icon on any leaderboard prompt to immediately re-test that cache hit.
+4. Adjust the **Semantic Distance Threshold Slider** live to test strict vs loose matching.
+5. Inspect the **Valkey Cache Explorer** tab to view stored keys or purge the cache.

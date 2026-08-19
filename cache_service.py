@@ -36,6 +36,8 @@ class QueryResult:
     distance: Optional[float] = None
     similarity_pct: Optional[float] = None
     matched_prompt: Optional[str] = None
+    hit_key: Optional[str] = None
+    hit_count: Optional[int] = None
     prompt_tokens: int = 0
     completion_tokens: int = 0
     total_tokens: int = 0
@@ -49,6 +51,15 @@ class CacheEntry:
     ttl: Optional[int] = None
 
 
+@dataclass
+class LeaderboardEntry:
+    rank: int
+    key: str
+    prompt: str
+    hits: int
+    response: Optional[str] = None
+
+
 class SemanticCacheService:
     def __init__(self):
         self.config = config
@@ -56,6 +67,7 @@ class SemanticCacheService:
         self.ttl = config.cache_ttl
         self.index_name = f"{config.cache_index_name}:{config.cache_prefix}"
         self.prefix = f"{self.index_name}:"
+        self.leaderboard_key = config.cache_leaderboard_key or f"{self.prefix}leaderboard"
         self._raw_client: Optional[redis.Redis] = None
         self._text_client: Optional[redis.Redis] = None
         self._embeddings: Optional[GoogleGenerativeAIEmbeddings] = None
@@ -266,15 +278,21 @@ class SemanticCacheService:
             res = client.execute_command(*cmd)
             total = res[0] if isinstance(res, (list, tuple)) and len(res) > 0 else 0
             if total > 0:
+                doc_key_raw = res[1]
+                hit_key_str = (
+                    doc_key_raw.decode("utf-8", errors="ignore")
+                    if isinstance(doc_key_raw, bytes)
+                    else str(doc_key_raw)
+                )
                 doc_fields = res[2]
                 fields_dict = {}
                 for i in range(0, len(doc_fields), 2):
-                    key_str = (
+                    f_name = (
                         doc_fields[i].decode("utf-8", errors="ignore")
                         if isinstance(doc_fields[i], bytes)
                         else str(doc_fields[i])
                     )
-                    fields_dict[key_str] = doc_fields[i + 1]
+                    fields_dict[f_name] = doc_fields[i + 1]
 
                 cached_vec_raw = fields_dict.get("prompt_vector")
                 if cached_vec_raw and len(cached_vec_raw) >= 768 * 4:
@@ -291,6 +309,9 @@ class SemanticCacheService:
                         cached_resp = fields_dict.get("response", b"").decode("utf-8", errors="ignore")
                         similarity_pct = max(0.0, min(100.0, round((1.0 - cos_dist) * 100.0, 1)))
 
+                        # Record cache hit in Valkey Sorted Set
+                        hit_count = self.record_cache_hit(hit_key_str)
+
                         elapsed_ms = (time.perf_counter() - start_time) * 1000.0
                         return QueryResult(
                             answer=cached_resp,
@@ -299,6 +320,8 @@ class SemanticCacheService:
                             distance=round(cos_dist, 4),
                             similarity_pct=similarity_pct,
                             matched_prompt=cached_prompt,
+                            hit_key=hit_key_str,
+                            hit_count=hit_count,
                             prompt_tokens=0,
                             completion_tokens=0,
                             total_tokens=0,
@@ -356,6 +379,55 @@ class SemanticCacheService:
             total_tokens=t_tokens,
         )
 
+    def record_cache_hit(self, key_str: str) -> int:
+        """
+        Increment hit count for a cache key in the leaderboard sorted set.
+        Returns the updated total hit count for this key.
+        """
+        try:
+            client = self.get_redis_client(decode_responses=True)
+            score = client.zincrby(self.leaderboard_key, 1, key_str)
+            return int(score)
+        except Exception as e:
+            logger.warning(f"Error recording cache hit in sorted set for {key_str}: {e}")
+            return 0
+
+    def get_prompt_leaderboard(self, limit: int = 10) -> List[Dict[str, Any]]:
+        """
+        Retrieve top cached prompts ranked by cache hit count from the sorted set,
+        pulling the original prompt text and response from the corresponding Valkey HASH.
+        """
+        leaderboard = []
+        try:
+            client = self.get_redis_client(decode_responses=True)
+            top_items = client.zrange(self.leaderboard_key, 0, limit - 1, desc=True, withscores=True)
+
+            for rank, (key_str, score) in enumerate(top_items, start=1):
+                # Pull prompt and response from the Valkey HASH
+                prompt = client.hget(key_str, "prompt")
+                response = client.hget(key_str, "response")
+
+                leaderboard.append({
+                    "rank": rank,
+                    "key": key_str,
+                    "hits": int(score),
+                    "prompt": prompt or "(Evicted or expired entry)",
+                    "response": response or "",
+                })
+        except Exception as e:
+            logger.warning(f"Error retrieving prompt leaderboard: {e}")
+        return leaderboard
+
+    def reset_leaderboard(self) -> bool:
+        """Reset the leaderboard sorted set in Valkey."""
+        try:
+            client = self.get_redis_client(decode_responses=True)
+            client.delete(self.leaderboard_key)
+            return True
+        except Exception as e:
+            logger.warning(f"Error resetting leaderboard: {e}")
+            return False
+
     def list_cached_entries(self) -> List[Dict[str, Any]]:
         """Retrieve all currently cached entries in Valkey for this prefix."""
         entries = []
@@ -370,33 +442,38 @@ class SemanticCacheService:
                 if key_type == "hash":
                     prompt = client.hget(key, "prompt") or ""
                     response = client.hget(key, "response") or ""
+                    # Also fetch hit count from sorted set if available
+                    hits = client.zscore(self.leaderboard_key, key)
                     entries.append({
                         "key": key,
                         "prompt": prompt,
                         "response": response,
                         "ttl": ttl if ttl > 0 else "Persistent",
+                        "hits": int(hits) if hits is not None else 0,
                     })
         except Exception as e:
             logger.warning(f"Error listing cache entries: {e}")
         return entries
 
     def delete_entry(self, key: str) -> bool:
-        """Delete a single cached entry."""
+        """Delete a single cached entry and remove it from the leaderboard sorted set."""
         try:
             client = self.get_redis_client(decode_responses=True)
             client.delete(key)
+            client.zrem(self.leaderboard_key, key)
             return True
         except Exception as e:
             logger.warning(f"Error deleting cache entry {key}: {e}")
             return False
 
     def clear_cache(self) -> bool:
-        """Clear all entries in the semantic cache."""
+        """Clear all entries in the semantic cache and reset leaderboard sorted set."""
         try:
             client = self.get_redis_client(decode_responses=True)
             keys = client.keys(f"{self.prefix}*")
             if keys:
                 client.delete(*keys)
+            client.delete(self.leaderboard_key)
             return True
         except Exception as e:
             logger.error(f"Cache clear failed: {e}")

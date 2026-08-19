@@ -220,19 +220,36 @@ def index():
                         on_click=lambda: purge_cache(),
                     ).props("flat dense color=negative no-caps").classes("text-xs")
 
-            # --- VALKEY CACHE EXPLORER ---
+            # --- VALKEY EXPLORER & LEADERBOARD ---
             with ui.card().classes("w-full bg-slate-800/90 border border-slate-700 p-4 rounded-xl shadow-lg"):
                 with ui.row().classes("items-center justify-between w-full pb-2 border-b border-slate-700"):
-                    with ui.row().classes("items-center gap-2"):
-                        ui.icon("storage", size="20px").classes("text-cyan-400")
-                        ui.label("Valkey Cache Explorer").classes("text-sm font-semibold text-white")
-                    
+                    with ui.tabs().classes("text-slate-300 dense") as valkey_tabs:
+                        tab_leaderboard = ui.tab("🏆 Top Prompts", icon="leaderboard").classes("text-xs font-semibold")
+                        tab_explorer = ui.tab("📦 Cache Explorer", icon="storage").classes("text-xs font-semibold")
+
                     ui.button(
                         icon="refresh",
-                        on_click=lambda: refresh_cache_table(),
-                    ).props("flat dense color=primary").tooltip("Refresh cached entries from Valkey")
+                        on_click=lambda: refresh_all_valkey_views(),
+                    ).props("flat round dense color=primary").tooltip("Refresh Valkey data")
 
-                cache_table_container = ui.column().classes("w-full pt-2")
+                with ui.tab_panels(valkey_tabs, value=tab_leaderboard).classes("w-full bg-transparent p-0 pt-2"):
+                    # Panel 1: Top Prompts Leaderboard
+                    with ui.tab_panel(tab_leaderboard).classes("p-0 w-full"):
+                        with ui.row().classes("w-full justify-between items-center pb-1 text-slate-400 text-[11px]"):
+                            ui.label("Ranked by Sorted Set hits • Prompt from HASH")
+                            ui.button(
+                                "Reset Scores",
+                                icon="restart_alt",
+                                on_click=lambda: reset_leaderboard_handler(),
+                            ).props("flat dense color=amber-400 no-caps size=xs").tooltip("Reset hit counters in Valkey")
+
+                        leaderboard_container = ui.column().classes("w-full gap-2 pt-1")
+
+                    # Panel 2: Valkey Cache Explorer
+                    with ui.tab_panel(tab_explorer).classes("p-0 w-full"):
+                        with ui.row().classes("w-full justify-between items-center pb-1 text-slate-400 text-[11px]"):
+                            ui.label("Raw HASH keys in Valkey")
+                        cache_table_container = ui.column().classes("w-full gap-2 pt-1")
 
     # -------------------------------------------------------------
     # HELPER FUNCTIONS
@@ -254,6 +271,39 @@ def index():
             last_status_lbl.classes(replace="text-xs font-semibold text-amber-400")
         last_latency_lbl.text = f"{metrics['last_latency_ms']:.1f} ms"
 
+    def refresh_leaderboard():
+        leaderboard_container.clear()
+        lb_items = service.get_prompt_leaderboard(limit=10)
+        with leaderboard_container:
+            if not lb_items:
+                with ui.card().classes("w-full bg-slate-900/60 p-3 rounded-lg border border-slate-700/40 text-center"):
+                    ui.label("No cache hits recorded yet.").classes("text-xs text-slate-400 font-medium")
+                    ui.label("Ask questions matching cached prompts to increment Valkey sorted set hit counters!").classes("text-[11px] text-slate-500 mt-0.5")
+                return
+
+            ui.label(f"{len(lb_items)} prompt(s) on leaderboard:").classes("text-xs font-medium text-slate-300 mb-0.5")
+            for item in lb_items:
+                rank = item["rank"]
+                rank_color = "amber-400" if rank == 1 else ("slate-300" if rank == 2 else ("amber-700" if rank == 3 else "slate-400"))
+                rank_icon = "🥇" if rank == 1 else ("🥈" if rank == 2 else ("🥉" if rank == 3 else f"#{rank}"))
+
+                with ui.card().classes("w-full bg-slate-900 p-2.5 rounded-lg border border-slate-700/60 gap-1.5"):
+                    with ui.row().classes("w-full items-center justify-between"):
+                        with ui.row().classes("items-center gap-1.5 flex-1 min-w-0"):
+                            ui.label(rank_icon).classes(f"text-xs font-bold text-{rank_color}")
+                            with ui.badge(color="positive").classes("px-1.5 py-0.2 text-[10px] font-bold"):
+                                ui.label(f"🔥 {item['hits']} hit{'s' if item['hits'] != 1 else ''}")
+                            ui.label(item["prompt"]).classes("text-xs font-semibold text-slate-200 truncate flex-1").tooltip(item["prompt"])
+
+                        ui.button(
+                            icon="play_arrow",
+                            on_click=lambda p=item["prompt"]: run_prompt(p),
+                        ).props("flat round dense size=xs color=sky-400").tooltip("Send this query to test cache hit")
+
+                    if item["response"]:
+                        with ui.expansion(text="Cached Answer Preview").classes("w-full text-[11px] text-slate-400"):
+                            ui.label(item["response"]).classes("text-[11px] text-slate-300 italic")
+
     def refresh_cache_table():
         cache_table_container.clear()
         entries = service.list_cached_entries()
@@ -266,25 +316,42 @@ def index():
             for item in entries[:5]:
                 with ui.card().classes("w-full bg-slate-900 p-2.5 rounded-lg border border-slate-700/60 gap-1"):
                     with ui.row().classes("w-full items-center justify-between"):
-                        ui.label(item["prompt"]).classes("text-xs font-semibold text-slate-200 truncate max-w-[280px]")
+                        with ui.row().classes("items-center gap-1.5 flex-1 min-w-0"):
+                            if item.get("hits", 0) > 0:
+                                with ui.badge(color="positive").classes("px-1 py-0.2 text-[9px] font-bold"):
+                                    ui.label(f"{item['hits']} hits")
+                            ui.label(item["prompt"]).classes("text-xs font-semibold text-slate-200 truncate flex-1 max-w-[240px]")
+
                         ui.button(
                             icon="close",
                             on_click=lambda k=item["key"]: delete_entry_handler(k),
                         ).props("flat round dense size=xs color=slate-400").tooltip("Delete entry")
                     ui.label(item["response"][:80] + ("..." if len(item["response"]) > 80 else "")).classes("text-[11px] text-slate-400")
 
+    def refresh_all_valkey_views():
+        refresh_leaderboard()
+        refresh_cache_table()
+
+    def reset_leaderboard_handler():
+        success = service.reset_leaderboard()
+        if success:
+            ui.notify("Valkey Leaderboard Sorted Set Reset!", type="info", position="top-right")
+            refresh_all_valkey_views()
+        else:
+            ui.notify("Failed to reset leaderboard", type="negative", position="top-right")
+
     def delete_entry_handler(key: str):
         success = service.delete_entry(key)
         if success:
             ui.notify(f"Deleted cache key: {key}", type="positive", position="top-right")
-            refresh_cache_table()
+            refresh_all_valkey_views()
         else:
             ui.notify("Failed to delete entry", type="negative", position="top-right")
 
     def purge_cache():
         service.clear_cache()
-        ui.notify("Valkey Semantic Cache Cleared!", type="warning", position="top-right")
-        refresh_cache_table()
+        ui.notify("Valkey Semantic Cache & Leaderboard Cleared!", type="warning", position="top-right")
+        refresh_all_valkey_views()
 
     async def run_prompt(prompt_text: str):
         if not prompt_text or not prompt_text.strip():
@@ -355,6 +422,10 @@ def index():
                     if res.is_cache_hit:
                         with ui.badge(color="positive").classes("px-2 py-0.5 text-[11px] font-bold"):
                             ui.label(f"⚡ CACHE HIT ({res.similarity_pct:.1f}% match)")
+
+                        if res.hit_count:
+                            with ui.badge(color="amber-900").classes("px-2 py-0.5 text-[11px] font-bold text-amber-200 border border-amber-500/50"):
+                                ui.label(f"🔥 Hit #{res.hit_count}")
                         
                         ui.label(f"Distance: {res.distance:.3f}").classes("text-[11px] text-slate-400 font-mono")
                         ui.label(f"Latency: {res.latency_ms:.1f}ms").classes("text-[11px] text-emerald-400 font-mono font-bold")
@@ -363,6 +434,8 @@ def index():
                         if res.matched_prompt:
                             with ui.expansion(text="Matched Source Query").classes("w-full text-xs text-slate-400"):
                                 ui.label(f"\"{res.matched_prompt}\"").classes("italic text-slate-300")
+                                if res.hit_key:
+                                    ui.label(f"Valkey Key: {res.hit_key}").classes("text-[10px] font-mono text-slate-400 mt-1")
                     else:
                         with ui.badge(color="warning").classes("px-2 py-0.5 text-[11px] font-bold"):
                             ui.label("🔴 CACHE MISS")
@@ -373,10 +446,10 @@ def index():
 
         chat_scroll.scroll_to(percent=1.0)
         refresh_telemetry()
-        refresh_cache_table()
+        refresh_all_valkey_views()
 
-    # Initial table population
-    refresh_cache_table()
+    # Initial view population
+    refresh_all_valkey_views()
 
 
 if __name__ in {"__main__", "__mp_main__"}:
