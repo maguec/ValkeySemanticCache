@@ -1,36 +1,33 @@
 # ⚡ Smart Support Concierge — Valkey Semantic Cache POC
 
-An interactive Proof-of-Concept demonstrating **LangChain's RedisSemanticCache** with a remote **Valkey** server and **Google Cloud Vertex AI (Gemini + text-embedding-004)**. Built with **NiceGUI** and managed with **uv**.
+An interactive Proof-of-Concept demonstrating **LangChain's RedisSemanticCache** with a remote **Valkey** (or Memorystore for Valkey) instance and **Google Cloud Vertex AI (Gemini + text-embedding-004)**. Built with **NiceGUI**, containerized with **Docker**, and ready for deployment on **Google Cloud Run**.
 
 ---
 
 ## Why Semantic Caching
 
-While caching database results has been a very common way to lower costs and dramatically improve latency, it requires an exact match of the query which works well for templatized queries.  This does not translate well into the world of natural language.
+While caching database results has been a very common way to lower costs and dramatically improve latency, it requires an exact match of the query which works well for templatized queries. This does not translate well into the world of natural language.
 
-Semantic caching will look at the actual content of the natural language question and search the cache for similar questions.
+Semantic caching looks at the actual content of the natural language question and searches the cache for similar questions.
 
 For example:
+- *How do I reset my account password?*
+- *How can I recover my credentials?*
 
-- How do I reset my account password?
-- How can I recover my credentials?
+While obvious to a human that these express the same intent, traditional key-value exact matching misses this. A semantic cache finds previously answered questions that are semantically similar, dramatically lowering costs and latency for serving common questions.
 
-While obvious to any human that these are the same question by looking at the meaning of the words, this would not work with older methods.  The semantic cache attempts to find questions already answered that are similar.
-
-The caching then can dramatically lower the costs and lantency of serving commonly asked questions.
-
-## When to implement 
+## When to Implement 
 
 You should implement semantic caching if:
-- The token cost to answer questions is high
-- The latency of those costs is high
-- The questions asked are often very similar
-
+- Token costs to answer user queries are high
+- LLM response latency is noticeable
+- Questions asked by users frequently cover similar topics
 
 You should *NOT* implement semantic caching if:
-- The questions being asked are unique - In my experience this is almost never the case despite what most people think.
-- Token costs are low and the LLM latency is low
+- The questions being asked are strictly unique per request
+- Token costs and LLM latency are negligible
 
+---
 
 ## 🎯 Architecture & How It Works
 
@@ -56,72 +53,132 @@ You should *NOT* implement semantic caching if:
 
 1. **Semantic Interception**: When a user asks a question, LangChain generates an embedding vector via `text-embedding-004`.
 2. **Vector Similarity in Valkey**: It searches the remote Valkey index for cosine similarity against previously cached queries within the configured `distance_threshold` (e.g. `0.20`).
-3. **Cache Hit & Sorted Set Leaderboard**: Returns the response in milliseconds with **0 LLM tokens billed**, increments the cache key in a Valkey **Sorted Set (ZSET)** via `ZINCRBY`, and tracks prompt frequency on a live leaderboard by pulling the original prompt from the Valkey **HASH**.
+3. **Cache Hit & Leaderboard**: Returns the response in milliseconds with **0 LLM tokens billed**, increments the cache key in a Valkey **Sorted Set (ZSET)** via `ZINCRBY`, and tracks prompt frequency on a live leaderboard.
 4. **Cache Miss**: Calls Vertex AI Gemini, delivers the response, and vector-stores the prompt-response pair in Valkey.
-5. **Persistent Telemetry**: All operational metrics (total queries, hits, misses, tokens saved, latency, speedup) are stored in an atomic Valkey **HASH**, persisting all metrics across application restarts.
+5. **Persistent Telemetry**: All operational metrics (total queries, hits, misses, tokens saved, latency, speedup) are stored in an atomic Valkey **HASH**, persisting metrics across application restarts.
 
 ---
 
-## 🚀 Getting Started
+## ⚙️ Environment Variables
 
-### 1. Configure Environment Variables (`.env`)
+The application is configured using the following environment variables:
 
-Have a working Valkey server with search enabled.
-If you do not have one [this is how to spin one up on Google Cloud](./GCP-Setup.md)
+| Variable | Default | Description |
+|---|---|---|
+| `VALKEY_URL` | `redis://localhost:6379/0` | Full connection URL (overrides individual host/port) |
+| `VALKEY_HOST` | `localhost` | Valkey host IP/hostname |
+| `VALKEY_PORT` | `6379` | Valkey port |
+| `VALKEY_PASSWORD` | `""` | Valkey authentication password |
+| `VALKEY_SSL` | `false` | Enable TLS/SSL connection (`true`/`false`) |
+| `GOOGLE_CLOUD_PROJECT` | `mague-tf` | GCP Project ID for Vertex AI |
+| `GOOGLE_CLOUD_LOCATION` | `us-central1` | GCP region for Vertex AI models |
+| `VERTEXAI_MODEL` | `gemini-2.5-flash` | Gemini model name |
+| `VERTEXAI_EMBEDDING_MODEL` | `text-embedding-004` | Vertex AI Embedding model |
+| `SEMANTIC_CACHE_DISTANCE_THRESHOLD` | `0.20` | Cosine distance threshold (smaller = stricter) |
+| `SEMANTIC_CACHE_TTL` | `3600` | Cache entry expiration in seconds |
+| `SEMANTIC_CACHE_INDEX_NAME` | `support_concierge_cache` | Vector index name in Valkey |
+| `SEMANTIC_CACHE_PREFIX` | `support_concierge` | Key prefix in Valkey |
+| `PORT` | `8080` | Application HTTP listening port |
 
-### 2. Configure Environment Variables (`.env`)
+---
 
-Copy `.env.example` to `.env` and fill in your remote Valkey credentials and GCP project:
+## ☁️ Deploying to Google Cloud Run
+
+Set your target GCP Project ID and Region environment variables before running deployment steps:
 
 ```bash
-# In .env:
-VALKEY_URL=redis://:YOUR_REMOTE_PASSWORD@your-valkey-host.example.com:6379/0
-
-# (Or with TLS/SSL if your remote Valkey requires rediss://)
-# VALKEY_URL=rediss://:YOUR_REMOTE_PASSWORD@your-valkey-host.example.com:6380/0
-
-GOOGLE_CLOUD_PROJECT=MYPROJECT
-GOOGLE_CLOUD_LOCATION=us-west1
-VERTEXAI_MODEL=gemini-2.5-flash
-VERTEXAI_EMBEDDING_MODEL=text-embedding-004
-SEMANTIC_CACHE_DISTANCE_THRESHOLD=0.20
-SEMANTIC_CACHE_TTL=3600
+export PROJECT_ID="your-gcp-project-id"
+export REGION="your-gcp-region"
 ```
 
-### 3. Google Cloud Authentication
+### Option 1: Using Terraform Templates
 
-Ensure you are authenticated to Google Cloud with Application Default Credentials:
+The repository includes ready-to-use Terraform modules in the `terraform` folder:
+
+1. **Deploy Application & Infrastructure to Cloud Run**:
+   ```bash
+   cd ./terraform
+   terraform init
+   terraform apply \
+     -var="gcp_project_id=$PROJECT_ID" \
+     -var="region=$REGION" \
+     -var="valkey_version=VALKEY_9_0" \
+     -var="valkey_mode=CLUSTER_DISABLED" \
+     -var="cluster_nodes=1"
+   ```
+
+   > [!NOTE]
+   > Terraform automatically provisions the VPC network with Direct VPC egress, sets up the Memorystore for Valkey instance, creates the Artifact Registry repository, builds and pushes the **ValkeySemanticCache** source code via Cloud Build, and deploys the application to Cloud Run in `$REGION`.
+
+---
+
+### Option 2: Deploying via `gcloud` CLI
+
+1. **Build and submit the container image to Artifact Registry**:
+   ```bash
+   gcloud builds submit --tag ${REGION}-docker.pkg.dev/${PROJECT_ID}/app/valkey-semantic-cache:latest .
+   ```
+
+2. **Deploy to Cloud Run**:
+   ```bash
+   gcloud run deploy valkey-semantic-cache \
+     --image ${REGION}-docker.pkg.dev/${PROJECT_ID}/app/valkey-semantic-cache:latest \
+     --region ${REGION} \
+     --allow-unauthenticated \
+     --set-env-vars GOOGLE_CLOUD_PROJECT=${PROJECT_ID} \
+     --set-env-vars GOOGLE_CLOUD_LOCATION=${REGION} \
+     --set-env-vars VALKEY_URL="redis://:YOUR_PASSWORD@YOUR_VALKEY_IP:6379/0"
+   ```
+
+---
+
+## 💻 Local Development
+
+### 1. Configure Local Environment (`.env`)
+
+Copy `.env.example` to `.env` and fill in your Valkey credentials and GCP project:
+
+```bash
+cp .env.example .env
+```
+
+### 2. Google Cloud Authentication
+
+Authenticate with Google Cloud Application Default Credentials:
 
 ```bash
 gcloud auth application-default login
 ```
 
-### 4. Run the NiceGUI Application
-
-Launch the web app with `uv`:
+### 3. Run Locally with `uv`
 
 ```bash
 uv run python main.py
 ```
 
-> [!TIP]
-> **Automatic Index Initialization**: The Python application automatically creates and verifies the vector search index (`support_concierge_cache:support_concierge`) with the exact `TAG` + `NUMERIC` + `VECTOR FLAT` schema on startup—no manual index creation commands or external setup scripts needed.
+Or run via Docker:
+
+```bash
+docker build -t valkey-semantic-cache .
+docker run -p 8080:8080 --env-file .env valkey-semantic-cache
+```
 
 Open your browser at **`http://localhost:8080`**.
+
+> [!TIP]
+> **Automatic Index Initialization**: The application automatically verifies and creates the vector search index (`support_concierge_cache:support_concierge`) with `TAG` + `NUMERIC` + `VECTOR FLAT` schema on startup—no manual schema setup needed.
 
 ---
 
 ## 🧪 Testing the POC
 
 1. Click any **"Base Query (Miss)"** chip under *Quick Semantic Test Variations*:
-   - Watch the status show 🔴 **CACHE MISS**, invoking Vertex AI Gemini (~1,200 ms).
-   - The query and answer are now stored as a vector embedding in your remote Valkey instance.
+   - Status shows 🔴 **CACHE MISS**, invoking Vertex AI Gemini (~1,200 ms).
+   - Prompt & answer pair is vectorized and stored in Valkey.
 2. Click **"Variation 1 (Hit)"** or **"Variation 2 (Hit)"** with alternative phrasing:
    - Notice the instant ⚡ **CACHE HIT** response in **~8 ms** (~120x speedup).
-   - Check the **match percentage** (e.g. 94.2% match), the expandable matched source query, and the **Hit counter badge**.
-3. Check the **🏆 Top Prompts (Leaderboard)** tab in the right panel:
-   - See the most frequently hit prompts dynamically ranked by Valkey **Sorted Set (ZSET)** hit count.
-   - Observe how the prompt text and answer preview are retrieved directly from the corresponding Valkey **HASH**.
-   - Click the play icon on any leaderboard prompt to immediately re-test that cache hit.
+   - Inspect match percentage, original source query, and hit counters.
+3. View the **🏆 Top Prompts (Leaderboard)** tab in the right panel:
+   - Live ranking based on Valkey **Sorted Set (ZSET)** hit counts.
 4. Adjust the **Semantic Distance Threshold Slider** live to test strict vs loose matching.
 5. Inspect the **Valkey Cache Explorer** tab to view stored keys or purge the cache.

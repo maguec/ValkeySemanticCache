@@ -7,10 +7,35 @@ wheels/
 *.egg-info
 
 # Virtual environments
-.venv
+.venv/
 
 # Environment variables & secrets
 .env
+.env.*
 
 # Keep prompts local
 GEMINI.md
+
+# Terraform temporary & state files
+**/.terraform/
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfstate.backup
+crash.log
+crash.*.log
+*.tfvars
+*.tfvars.json
+!terraform.tfvars.example
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+.terraformrc
+terraform.rc
+*.tfplan
+
+# OS & IDE files
+.DS_Store
+.vscode/
+.idea/
