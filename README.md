@@ -125,3 +125,30 @@ Open your browser at **`http://localhost:8080`**.
    - Click the play icon on any leaderboard prompt to immediately re-test that cache hit.
 4. Adjust the **Semantic Distance Threshold Slider** live to test strict vs loose matching.
 5. Inspect the **Valkey Cache Explorer** tab to view stored keys or purge the cache.
+
+---
+
+## 📊 Benchmarking & Performance Analysis
+
+[Sample Output](./benchmark_report.md)
+
+Run the 1,000-query benchmark to measure performance, cache hit rate, token savings, and latency reduction:
+
+```bash
+# Run 1,000 queries targeting ~80% Cache Hit Rate (Live Valkey + Vertex AI)
+uv run python benchmark.py
+
+# Run in offline simulation mode (0 API quota used)
+uv run python benchmark.py --mock --queries 1000
+
+# Custom query count, target hit rate, and export report
+uv run python benchmark.py --queries 500 --target-hit-rate 0.80 --report benchmark_report.md
+```
+
+### Tabulated Metrics Output
+
+The benchmark tabulates the primary metrics:
+- **Cache Hit Rate**: Percentage of queries served directly from Valkey.
+- **% of Tokens Saved**: Percentage reduction in LLM token consumption.
+- **% of Time Saved**: Percentage reduction in total user wait time / compute latency.
+- Full breakdown by topic category, latency distributions, and speedup factor.
