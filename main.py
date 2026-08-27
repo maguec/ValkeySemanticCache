@@ -12,19 +12,19 @@ chat_history: List[Dict[str, Any]] = []
 # Pre-populated test scenario variations
 SCENARIOS = {
     "💳 Subscriptions & Refunds": [
-        ("Base Query (Miss)", "How can I cancel my subscription and get a refund?"),
-        ("Variation 1 (Hit)", "I want to stop paying for my account and get my money back."),
-        ("Variation 2 (Hit)", "What is the procedure to terminate membership and be reimbursed?"),
+        "How can I cancel my subscription and get a refund?",
+        "I want to stop paying for my account and get my money back.",
+        "What is the procedure to terminate membership and be reimbursed?",
     ],
     "🔑 Password & Auth": [
-        ("Base Query (Miss)", "How do I reset my account password?"),
-        ("Variation 1 (Hit)", "I forgot my login password, how do I recover it?"),
-        ("Variation 2 (Hit)", "Where can I change my lost credentials?"),
+        "How do I reset my account password?",
+        "I forgot my login password, how do I recover it?",
+        "Where can I change my lost credentials?",
     ],
     "🚀 API Quotas & Limits": [
-        ("Base Query (Miss)", "What are the API rate limits and quotas for CloudNova?"),
-        ("Variation 1 (Hit)", "How many requests per minute can I make to the API?"),
-        ("Variation 2 (Hit)", "Is there a cap on API calls per second?"),
+        "What are the API rate limits and quotas for CloudNova?",
+        "How many requests per minute can I make to the API?",
+        "Is there a cap on API calls per second?",
     ],
 }
 
@@ -83,7 +83,7 @@ def index():
             ui.icon("bolt", size="32px").classes("text-amber-400")
             with ui.column().classes("gap-0"):
                 ui.label("Smart Support Concierge").classes("text-xl font-bold text-white tracking-wide")
-                ui.label("Valkey Semantic Cache POC with LangChain & Vertex AI").classes("text-xs text-slate-400")
+                ui.label("Valkey Semantic Cache POC with LangChain & Gemini").classes("text-xs text-slate-400")
 
         with ui.row().classes("items-center gap-3"):
             # Valkey status chip
@@ -100,44 +100,19 @@ def index():
             if vertex_connected:
                 with ui.badge(color="positive").classes("px-3 py-1.5 text-xs flex items-center gap-1.5"):
                     ui.icon("check_circle", size="14px")
-                    ui.label(f"Vertex AI: {config.vertex_model}")
+                    ui.label(f"Model: {config.vertex_model}")
             else:
                 with ui.badge(color="negative").classes("px-3 py-1.5 text-xs flex items-center gap-1.5"):
                     ui.icon("warning", size="14px")
-                    ui.label(f"Vertex AI Offline ({config.vertex_model})")
-
-    # -------------------------------------------------------------
-    # PRESET TEST PROMPTS BAR
-    # -------------------------------------------------------------
-    with ui.card().classes("w-full bg-slate-800/80 border border-slate-700/60 p-4 mb-4 rounded-xl"):
-        with ui.row().classes("items-center justify-between w-full mb-2"):
-            with ui.row().classes("items-center gap-2"):
-                ui.icon("science", size="20px").classes("text-amber-400")
-                ui.label("Quick Semantic Test Variations").classes("text-sm font-semibold text-slate-200")
-            ui.label("Click any prompt to send and test semantic cache matching live").classes("text-xs text-slate-400")
-
-        with ui.row().classes("w-full gap-4 flex-wrap"):
-            for category, variations in SCENARIOS.items():
-                with ui.column().classes("flex-1 min-w-[280px] bg-slate-900/60 p-3 rounded-lg border border-slate-700/40 gap-2"):
-                    ui.label(category).classes("text-xs font-bold text-slate-300 uppercase tracking-wider")
-                    for label, prompt_text in variations:
-                        is_base = "Base" in label
-                        btn_color = "slate-700" if is_base else "sky-900"
-                        border_style = "border border-amber-500/40" if is_base else "border border-sky-500/30"
-                        
-                        btn = ui.button(
-                            f"{label}: \"{prompt_text[:35]}...\"",
-                            on_click=lambda p=prompt_text: run_prompt(p),
-                        ).props("no-caps dense outline align=left").classes(f"w-full text-xs text-slate-200 {border_style} hover:bg-slate-700 transition")
-                        btn.tooltip(prompt_text)
+                    ui.label(f"AI Offline ({config.vertex_model})")
 
     # -------------------------------------------------------------
     # MAIN 2-COLUMN LAYOUT
     # -------------------------------------------------------------
-    with ui.row().classes("w-full gap-6 items-start"):
+    with ui.row().classes("w-full gap-6 items-start mb-4"):
         
         # ---------------------------------------------------------
-        # LEFT: CHAT INTERFACE
+        # LEFT: CHAT INTERFACE & TEST VARIATIONS
         # ---------------------------------------------------------
         with ui.column().classes("flex-1 min-w-[500px] gap-4"):
             with ui.card().classes("w-full bg-slate-800/90 border border-slate-700 p-4 rounded-xl shadow-lg"):
@@ -148,7 +123,7 @@ def index():
                     ui.label("Ask customer support questions in any phrasing").classes("text-xs text-slate-400")
 
                 # Chat message scroll area
-                chat_scroll = ui.scroll_area().classes("w-full h-[460px] p-2")
+                chat_scroll = ui.scroll_area().classes("w-full h-[440px] p-2")
                 with chat_scroll:
                     chat_container = ui.column().classes("w-full gap-3")
                     with chat_container:
@@ -162,7 +137,7 @@ def index():
                 # Chat input controls
                 with ui.row().classes("w-full gap-2 pt-3 items-center border-t border-slate-700"):
                     query_input = ui.input(
-                        placeholder="Type a support question or click a preset above...",
+                        placeholder="Type a support question or click a preset below...",
                     ).props("outlined dense dark autofocus").classes("flex-1 text-sm bg-slate-900 rounded-lg")
                     
                     send_btn = ui.button(
@@ -171,6 +146,25 @@ def index():
                     ).props("dense color=primary").classes("px-4 py-2 rounded-lg")
 
                     query_input.on("keydown.enter", lambda: run_prompt(query_input.value))
+
+            # --- PRESET TEST PROMPTS (LEFT OF LEADERBOARD) ---
+            with ui.card().classes("w-full bg-slate-800/90 border border-slate-700 p-3 rounded-xl shadow-lg gap-2"):
+                with ui.row().classes("items-center justify-between w-full pb-1 border-b border-slate-700/60"):
+                    with ui.row().classes("items-center gap-1.5"):
+                        ui.icon("science", size="18px").classes("text-amber-400")
+                        ui.label("Quick Semantic Test Variations").classes("text-xs font-semibold text-white")
+                    ui.label("Click to test live matching").classes("text-[10px] text-slate-400")
+
+                with ui.row().classes("w-full gap-2 flex-wrap"):
+                    for category, prompts in SCENARIOS.items():
+                        with ui.column().classes("flex-1 min-w-[200px] bg-slate-900/70 p-2 rounded-lg border border-slate-700/40 gap-1.5"):
+                            ui.label(category).classes("text-[10px] font-bold text-slate-300 uppercase tracking-wider")
+                            for prompt_text in prompts:
+                                btn = ui.button(
+                                    prompt_text,
+                                    on_click=lambda p=prompt_text: run_prompt(p),
+                                ).props("no-caps dense outline align=left").classes("w-full text-[10px] text-slate-200 border border-slate-700/70 hover:bg-slate-700/70 hover:border-sky-500/50 transition py-0.5 px-2 text-left leading-snug")
+                                btn.tooltip(prompt_text)
 
         # ---------------------------------------------------------
         # RIGHT: TELEMETRY HUD & VALKEY INSPECTOR
@@ -444,31 +438,42 @@ def index():
             ).classes("text-sm"):
                 
                 # Metadata Badge Area
-                with ui.row().classes("w-full items-center gap-2 pt-2 flex-wrap border-t border-slate-700/40 mt-1"):
+                with ui.row().classes("w-full items-center gap-2 pt-2 flex-wrap border-t border-slate-700/50 mt-1.5"):
                     if res.is_cache_hit:
-                        with ui.badge(color="positive").classes("px-2 py-0.5 text-[11px] font-bold"):
+                        with ui.badge(color="positive").classes("px-2 py-0.5 text-[11px] font-bold shadow"):
                             ui.label(f"⚡ CACHE HIT ({res.similarity_pct:.1f}% match)")
 
                         if res.hit_count:
                             with ui.badge(color="amber-900").classes("px-2 py-0.5 text-[11px] font-bold text-amber-200 border border-amber-500/50"):
                                 ui.label(f"🔥 Hit #{res.hit_count}")
                         
-                        ui.label(f"Distance: {res.distance:.3f}").classes("text-[11px] text-slate-400 font-mono")
-                        ui.label(f"Latency: {res.latency_ms:.1f}ms").classes("text-[11px] text-emerald-400 font-mono font-bold")
-                        ui.label("0 Tokens billed").classes("text-[11px] text-slate-400")
+                        with ui.badge(color="slate-900").classes("px-2 py-0.5 text-[11px] font-mono text-slate-100 font-medium border border-slate-700 bg-slate-900/90"):
+                            ui.label(f"Distance: {res.distance:.3f}")
+                        
+                        with ui.badge(color="slate-900").classes("px-2 py-0.5 text-[11px] font-mono text-emerald-300 font-bold border border-emerald-500/40 bg-slate-900/90"):
+                            ui.label(f"Latency: {res.latency_ms:.1f}ms")
+                        
+                        tokens_saved_str = f"0 Tokens billed ({res.tokens_saved} saved)" if res.tokens_saved > 0 else "0 Tokens billed"
+                        with ui.badge(color="slate-900").classes("px-2 py-0.5 text-[11px] font-mono text-amber-300 font-bold border border-amber-500/40 bg-slate-900/90"):
+                            ui.label(tokens_saved_str)
 
                         if res.matched_prompt:
-                            with ui.expansion(text="Matched Source Query").classes("w-full text-xs text-slate-400"):
-                                ui.label(f"\"{res.matched_prompt}\"").classes("italic text-slate-300")
+                            with ui.expansion(text="Matched Source Query").classes("w-full text-xs text-slate-200 bg-slate-900/60 rounded-lg px-2 mt-1 border border-slate-700/40"):
+                                ui.label(f"\"{res.matched_prompt}\"").classes("italic text-slate-100")
                                 if res.hit_key:
-                                    ui.label(f"Valkey Key: {res.hit_key}").classes("text-[10px] font-mono text-slate-400 mt-1")
+                                    ui.label(f"Valkey Key: {res.hit_key}").classes("text-[10px] font-mono text-slate-300 mt-1")
                     else:
-                        with ui.badge(color="warning").classes("px-2 py-0.5 text-[11px] font-bold"):
+                        with ui.badge(color="warning").classes("px-2 py-0.5 text-[11px] font-bold text-slate-950 shadow"):
                             ui.label("🔴 CACHE MISS")
                         
-                        ui.label(f"Gemini LLM: {res.latency_ms:.0f}ms").classes("text-[11px] text-amber-400 font-mono font-bold")
-                        ui.label(f"Tokens: {res.total_tokens}").classes("text-[11px] text-slate-400")
-                        ui.label("Cached for subsequent queries").classes("text-[11px] text-slate-400 italic")
+                        with ui.badge(color="slate-900").classes("px-2 py-0.5 text-[11px] font-mono text-amber-300 font-bold border border-amber-500/40 bg-slate-900/90"):
+                            ui.label(f"Gemini LLM: {res.latency_ms:.0f}ms")
+                        
+                        with ui.badge(color="slate-900").classes("px-2 py-0.5 text-[11px] font-mono text-slate-100 font-medium border border-slate-700 bg-slate-900/90"):
+                            ui.label(f"Tokens: {res.total_tokens}")
+                        
+                        with ui.badge(color="slate-900").classes("px-2 py-0.5 text-[11px] text-slate-200 italic border border-slate-700 bg-slate-900/90"):
+                            ui.label("Cached for subsequent queries")
 
         chat_scroll.scroll_to(percent=1.0)
         refresh_all_valkey_views()

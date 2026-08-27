@@ -41,6 +41,7 @@ class QueryResult:
     prompt_tokens: int = 0
     completion_tokens: int = 0
     total_tokens: int = 0
+    tokens_saved: int = 0
 
 
 @dataclass
@@ -49,6 +50,10 @@ class CacheEntry:
     prompt: str
     response: str
     ttl: Optional[int] = None
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+    total_tokens: int = 0
+    latency_ms: float = 0.0
 
 
 @dataclass
@@ -58,6 +63,7 @@ class LeaderboardEntry:
     prompt: str
     hits: int
     response: Optional[str] = None
+    total_tokens: int = 0
 
 
 class SemanticCacheService:
@@ -220,6 +226,14 @@ class SemanticCacheService:
                     "NUMERIC",
                     "updated_at",
                     "NUMERIC",
+                    "prompt_tokens",
+                    "NUMERIC",
+                    "completion_tokens",
+                    "NUMERIC",
+                    "total_tokens",
+                    "NUMERIC",
+                    "latency_ms",
+                    "NUMERIC",
                     "prompt_vector",
                     "VECTOR",
                     "FLAT",
@@ -291,10 +305,14 @@ class SemanticCacheService:
             self.index_name,
             "*=>[KNN 1 @prompt_vector $vector]",
             "RETURN",
-            "3",
+            "7",
             "prompt",
             "response",
             "prompt_vector",
+            "total_tokens",
+            "prompt_tokens",
+            "completion_tokens",
+            "latency_ms",
             "DIALECT",
             "2",
             "PARAMS",
@@ -338,12 +356,57 @@ class SemanticCacheService:
                         cached_resp = fields_dict.get("response", b"").decode("utf-8", errors="ignore")
                         similarity_pct = max(0.0, min(100.0, round((1.0 - cos_dist) * 100.0, 1)))
 
+                        def _to_int(val, default=0):
+                            if val is None:
+                                return default
+                            try:
+                                return int(val.decode("utf-8") if isinstance(val, bytes) else val)
+                            except (ValueError, TypeError):
+                                return default
+
+                        def _to_float(val, default=1200.0):
+                            if val is None:
+                                return default
+                            try:
+                                return float(val.decode("utf-8") if isinstance(val, bytes) else val)
+                            except (ValueError, TypeError):
+                                return default
+
+                        cached_total_tokens = _to_int(fields_dict.get("total_tokens"))
+                        cached_prompt_tokens = _to_int(fields_dict.get("prompt_tokens"))
+                        cached_completion_tokens = _to_int(fields_dict.get("completion_tokens"))
+                        cached_latency_ms = _to_float(fields_dict.get("latency_ms"), default=1200.0)
+
+                        # If total_tokens wasn't retrieved in fields_dict, attempt a direct HMGET fallback
+                        if cached_total_tokens <= 0:
+                            try:
+                                extra_fields = client.hmget(doc_key_raw, "total_tokens", "prompt_tokens", "completion_tokens", "latency_ms")
+                                if extra_fields and extra_fields[0] is not None:
+                                    cached_total_tokens = _to_int(extra_fields[0])
+                                    cached_prompt_tokens = _to_int(extra_fields[1])
+                                    cached_completion_tokens = _to_int(extra_fields[2])
+                                    cached_latency_ms = _to_float(extra_fields[3], default=1200.0)
+                            except Exception:
+                                pass
+
+                        # Fallback calculation if entry had no token metadata stored (legacy entry)
+                        if cached_total_tokens <= 0:
+                            cached_prompt_tokens = int(len(cached_prompt.split()) * 1.3)
+                            cached_completion_tokens = int(len(cached_resp.split()) * 1.3)
+                            cached_total_tokens = cached_prompt_tokens + cached_completion_tokens
+
                         # Record cache hit in Valkey Sorted Set
                         hit_count = self.record_cache_hit(hit_key_str)
 
                         elapsed_ms = (time.perf_counter() - start_time) * 1000.0
-                        # Persist telemetry metrics in Valkey HASH
-                        self.record_telemetry(is_cache_hit=True, latency_ms=elapsed_ms, tokens_saved=250)
+
+                        # Persist telemetry metrics in Valkey HASH using actual tokens and original latency
+                        self.record_telemetry(
+                            is_cache_hit=True,
+                            latency_ms=elapsed_ms,
+                            tokens_saved=cached_total_tokens,
+                            baseline_latency_ms=cached_latency_ms,
+                        )
 
                         return QueryResult(
                             answer=cached_resp,
@@ -357,6 +420,7 @@ class SemanticCacheService:
                             prompt_tokens=0,
                             completion_tokens=0,
                             total_tokens=0,
+                            tokens_saved=cached_total_tokens,
                         )
         except Exception as e:
             logger.warning(f"Valkey vector search error: {e}")
@@ -371,7 +435,15 @@ class SemanticCacheService:
         response = llm.invoke(messages)
         answer_text = str(response.content)
 
-        # Step 4: Vector-store (prompt, response, prompt_vector) in Valkey
+        elapsed_ms = (time.perf_counter() - start_time) * 1000.0
+
+        # Estimate / extract actual token metrics from the response
+        usage = getattr(response, "usage_metadata", None) or {}
+        p_tokens = usage.get("input_tokens", int(len(prompt.split()) * 1.3))
+        c_tokens = usage.get("output_tokens", int(len(answer_text.split()) * 1.3))
+        t_tokens = usage.get("total_tokens", p_tokens + c_tokens)
+
+        # Step 4: Vector-store (prompt, response, prompt_vector, tokens, latency) in Valkey
         try:
             entry_id = hashlib.sha256(prompt.encode("utf-8")).hexdigest()
             doc_key = f"{self.prefix}{entry_id}"
@@ -383,6 +455,10 @@ class SemanticCacheService:
                 b"prompt_vector": query_vec_bytes,
                 b"inserted_at": str(now).encode("utf-8"),
                 b"updated_at": str(now).encode("utf-8"),
+                b"prompt_tokens": str(p_tokens).encode("utf-8"),
+                b"completion_tokens": str(c_tokens).encode("utf-8"),
+                b"total_tokens": str(t_tokens).encode("utf-8"),
+                b"latency_ms": str(round(elapsed_ms, 2)).encode("utf-8"),
             }
 
             client.hset(doc_key, mapping=hash_data)
@@ -390,14 +466,6 @@ class SemanticCacheService:
                 client.expire(doc_key, self.ttl)
         except Exception as e:
             logger.warning(f"Failed to store entry in Valkey: {e}")
-
-        elapsed_ms = (time.perf_counter() - start_time) * 1000.0
-
-        # Estimate / extract token metrics
-        usage = getattr(response, "usage_metadata", None) or {}
-        p_tokens = usage.get("input_tokens", int(len(prompt.split()) * 1.3))
-        c_tokens = usage.get("output_tokens", int(len(answer_text.split()) * 1.3))
-        t_tokens = usage.get("total_tokens", p_tokens + c_tokens)
 
         # Persist telemetry metrics in Valkey HASH
         self.record_telemetry(is_cache_hit=False, latency_ms=elapsed_ms, tokens_saved=0)
@@ -412,13 +480,14 @@ class SemanticCacheService:
             prompt_tokens=p_tokens,
             completion_tokens=c_tokens,
             total_tokens=t_tokens,
+            tokens_saved=0,
         )
 
     def record_telemetry(
         self,
         is_cache_hit: bool,
         latency_ms: float,
-        tokens_saved: int = 250,
+        tokens_saved: int = 0,
         baseline_latency_ms: float = 1200.0,
     ) -> Dict[str, Any]:
         """
@@ -524,9 +593,16 @@ class SemanticCacheService:
             top_items = client.zrange(self.leaderboard_key, 0, limit - 1, desc=True, withscores=True)
 
             for rank, (key_str, score) in enumerate(top_items, start=1):
-                # Pull prompt and response from the Valkey HASH
-                prompt = client.hget(key_str, "prompt")
-                response = client.hget(key_str, "response")
+                # Pull specific text/numeric fields (avoid prompt_vector binary vector field)
+                fields = client.hmget(key_str, ["prompt", "response", "total_tokens"])
+                prompt = fields[0] if fields and fields[0] is not None else None
+                response = fields[1] if fields and fields[1] is not None else ""
+                total_tokens = 0
+                if fields and len(fields) > 2 and fields[2]:
+                    try:
+                        total_tokens = int(fields[2])
+                    except (ValueError, TypeError):
+                        total_tokens = 0
 
                 leaderboard.append({
                     "rank": rank,
@@ -534,6 +610,7 @@ class SemanticCacheService:
                     "hits": int(score),
                     "prompt": prompt or "(Evicted or expired entry)",
                     "response": response or "",
+                    "total_tokens": total_tokens,
                 })
         except Exception as e:
             logger.warning(f"Error retrieving prompt leaderboard: {e}")
@@ -564,14 +641,32 @@ class SemanticCacheService:
                 key_type = client.type(key)
                 ttl = client.ttl(key)
                 if key_type == "hash":
-                    prompt = client.hget(key, "prompt") or ""
-                    response = client.hget(key, "response") or ""
+                    # Pull specific text/numeric fields (avoid prompt_vector binary vector field)
+                    fields = client.hmget(key, ["prompt", "response", "total_tokens", "latency_ms"])
+                    prompt = fields[0] if fields and fields[0] is not None else ""
+                    response = fields[1] if fields and fields[1] is not None else ""
+                    total_tokens = 0
+                    if fields and len(fields) > 2 and fields[2]:
+                        try:
+                            total_tokens = int(fields[2])
+                        except (ValueError, TypeError):
+                            total_tokens = 0
+
+                    latency_ms = 0.0
+                    if fields and len(fields) > 3 and fields[3]:
+                        try:
+                            latency_ms = float(fields[3])
+                        except (ValueError, TypeError):
+                            latency_ms = 0.0
+
                     # Also fetch hit count from sorted set if available
                     hits = client.zscore(self.leaderboard_key, key)
                     entries.append({
                         "key": key,
                         "prompt": prompt,
                         "response": response,
+                        "total_tokens": total_tokens,
+                        "latency_ms": latency_ms,
                         "ttl": ttl if ttl > 0 else "Persistent",
                         "hits": int(hits) if hits is not None else 0,
                     })
