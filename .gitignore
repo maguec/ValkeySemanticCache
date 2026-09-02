@@ -12,5 +12,24 @@ wheels/
 # Environment variables & secrets
 .env
 
+# OS generated files
+.DS_Store
+*.swp
+
 # Keep prompts local
+
 GEMINI.md
+
+# Terraform temporary files, state & locks
+**/.terraform/
+*.tfstate
+*.tfstate.*
+crash.log
+crash.*.log
+*.tfvars
+!*.tfvars.example
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+.terraform.lock.hcl

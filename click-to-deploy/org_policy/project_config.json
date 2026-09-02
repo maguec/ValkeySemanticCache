@@ -1,0 +1,31 @@
+{
+  "apis_to_enable": [
+    "run.googleapis.com",
+    "aiplatform.googleapis.com",
+    "redis.googleapis.com",
+    "memorystore.googleapis.com",
+    "vpcaccess.googleapis.com",
+    "compute.googleapis.com",
+    "artifactregistry.googleapis.com",
+    "secretmanager.googleapis.com",
+    "iam.googleapis.com",
+    "cloudbuild.googleapis.com",
+    "networkconnectivity.googleapis.com",
+    "cloudresourcemanager.googleapis.com",
+    "orgpolicy.googleapis.com"
+  ],
+
+
+  "constraints": [
+    {
+      "constraint": "constraints/iam.allowedPolicyMemberDomains",
+      "policy_type": "list",
+      "allow_all": true
+    },
+    {
+      "constraint": "constraints/run.allowedIngress",
+      "policy_type": "list",
+      "allow_all": true
+    }
+  ]
+}
