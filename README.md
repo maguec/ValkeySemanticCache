@@ -170,12 +170,53 @@ export REGION="us-central1"
 
 ### Option 1: Deploying via `gcloud` CLI
 
+#### 📋 Prerequisites for `gcloud` Deployment
+
+Before running the deployment commands, ensure the following Google Cloud resources and services are provisioned:
+
+1. **Enable Google Cloud APIs**:
+   ```bash
+   gcloud services enable \
+     run.googleapis.com \
+     cloudbuild.googleapis.com \
+     artifactregistry.googleapis.com \
+     aiplatform.googleapis.com \
+     compute.googleapis.com \
+     --project ${PROJECT_ID}
+   ```
+
+2. **Create Artifact Registry Docker Repository**:
+   ```bash
+   gcloud artifacts repositories create valkey-semantic-cache-repo \
+     --repository-format=docker \
+     --location=${REGION} \
+     --description="Docker repo for Valkey Semantic Cache app" \
+     --project=${PROJECT_ID}
+   ```
+
+3. **Valkey Instance & VPC Networking**:
+   - An active **Memorystore for Valkey** (or Redis) instance running in your GCP project.
+   - A **VPC Network & Subnet** hosting Valkey (e.g. `default` network and subnet in `${REGION}`) for Cloud Run Direct VPC Egress.
+   - Valkey private IP address and AUTH password (if required).
+
+4. **Grant Vertex AI IAM Role to Cloud Run Service Account**:
+   ```bash
+   PROJECT_NUMBER=$(gcloud projects describe ${PROJECT_ID} --format="value(projectNumber)")
+
+   gcloud projects add-iam-policy-binding ${PROJECT_ID} \
+     --member="serviceAccount:${PROJECT_NUMBER}-compute@developer.gserviceaccount.com" \
+     --role="roles/aiplatform.user"
+   ```
+
+#### 🚀 Deployment Steps
+
 1. **Build and submit the container image to Artifact Registry**:
    ```bash
    gcloud builds submit . \
      --tag ${REGION}-docker.pkg.dev/${PROJECT_ID}/valkey-semantic-cache-repo/valkey-semantic-cache:latest \
      --project ${PROJECT_ID}
    ```
+
 
 2. **Deploy to Cloud Run with Direct VPC Egress**:
    ```bash
