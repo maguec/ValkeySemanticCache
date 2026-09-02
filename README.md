@@ -182,10 +182,22 @@ Before running the deployment commands, ensure the following Google Cloud resour
      artifactregistry.googleapis.com \
      aiplatform.googleapis.com \
      compute.googleapis.com \
+     orgpolicy.googleapis.com \
      --project ${PROJECT_ID}
    ```
 
-2. **Create Artifact Registry Docker Repository**:
+2. **Organization Policy & Access Constraints**:
+   - **Public Access**: Organization Policy `constraints/iam.allowedPolicyMemberDomains` (Domain Restricted Sharing) must be enabled for `allUsers` to allow unauthenticated invocations on the Cloud Run service.
+   - **Cloud Run Allowed Ingress**: Organization Policy `constraints/run.allowedIngress` must allow external ingress traffic.
+
+3. **VPC Subnet & Networking Requirements**:
+   - **Enable Private Google Access**: Private Google Access must be enabled on the VPC subnet.
+   - **Target Subnet Range Alignment**: Ensure the target subnet passed to Cloud Run matches Valkey's PSC subnet range. Cloud Run Direct VPC Egress interface must attach directly to the exact subnet containing the Valkey PSC endpoint forwarding rule IP range to establish network connectivity.
+
+4. **IAM Permissions**:
+   - Grant Compute Default Service Account IAM Roles (e.g. `roles/aiplatform.user`).
+
+5. **Create Artifact Registry Docker Repository**:
    ```bash
    gcloud artifacts repositories create valkey-semantic-cache-repo \
      --repository-format=docker \
@@ -194,19 +206,11 @@ Before running the deployment commands, ensure the following Google Cloud resour
      --project=${PROJECT_ID}
    ```
 
-3. **Valkey Instance & VPC Networking**:
+6. **Valkey Instance & VPC Networking**:
    - An active **Memorystore for Valkey** (or Redis) instance running in your GCP project.
-   - A **VPC Network & Subnet** hosting Valkey (e.g. `default` network and subnet in `${REGION}`) for Cloud Run Direct VPC Egress.
+   - A **VPC Network & Subnet** hosting Valkey for Cloud Run Direct VPC Egress.
    - Valkey private IP address and AUTH password (if required).
 
-4. **Grant Vertex AI IAM Role to Cloud Run Service Account**:
-   ```bash
-   PROJECT_NUMBER=$(gcloud projects describe ${PROJECT_ID} --format="value(projectNumber)")
-
-   gcloud projects add-iam-policy-binding ${PROJECT_ID} \
-     --member="serviceAccount:${PROJECT_NUMBER}-compute@developer.gserviceaccount.com" \
-     --role="roles/aiplatform.user"
-   ```
 
 #### 🚀 Deployment Steps
 
