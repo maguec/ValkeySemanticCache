@@ -194,8 +194,11 @@ Before running the deployment commands, ensure the following Google Cloud resour
    - **Enable Private Google Access**: Private Google Access must be enabled on the VPC subnet.
    - **Target Subnet Range Alignment**: Ensure the target subnet passed to Cloud Run matches Valkey's PSC subnet range. Cloud Run Direct VPC Egress interface must attach directly to the exact subnet containing the Valkey PSC endpoint forwarding rule IP range to establish network connectivity.
 
-4. **IAM Permissions**:
-   - Grant Compute Default Service Account IAM Roles (e.g. `roles/aiplatform.user`).
+4. **IAM Permissions for Default Compute Service Account**:
+   Grant the Compute Default Service Account (`<PROJECT_NUMBER>-compute@developer.gserviceaccount.com`):
+   - `roles/aiplatform.user` (to perform embeddings & Gemini inferences)
+   - `roles/artifactregistry.writer` (to push built images to Artifact Registry)
+   - `roles/storage.admin` (for Cloud Build source staging buckets)
 
 5. **Create Artifact Registry Docker Repository**:
    ```bash
