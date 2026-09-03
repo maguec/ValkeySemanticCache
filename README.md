@@ -173,6 +173,11 @@ Before running the deployment commands, ensure the following Google Cloud resour
 The repository includes ready-to-use Terraform modules in the `click-to-deploy` folder:
 
 1. **Configure Organization Policy & APIs**:
+   Set the quota project for Application Default Credentials (ADC) to prevent API authentication errors:
+   ```bash
+   gcloud auth application-default set-quota-project $PROJECT_ID
+   ```
+   Then apply the organization policies and enable necessary APIs:
    ```bash
    cd click-to-deploy/org_policy
    terraform init
