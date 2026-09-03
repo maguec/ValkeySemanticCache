@@ -1,3 +1,4 @@
+import os
 import time
 from typing import List, Dict, Any
 from fastapi.responses import JSONResponse
@@ -5,6 +6,7 @@ from nicegui import ui, app, run
 
 from config import config
 from cache_service import service, QueryResult
+from benchmark.app import render_benchmark_ui
 
 # Application state
 chat_history: List[Dict[str, Any]] = []
@@ -76,7 +78,7 @@ def index():
     vertex_connected, vertex_msg = service.test_vertex_connection()
 
     # -------------------------------------------------------------
-    # HEADER
+    # HEADER WITH MAIN NAVIGATION TABS
     # -------------------------------------------------------------
     with ui.header().classes("bg-slate-900 border-b border-slate-800 px-6 py-3 items-center justify-between shadow-md"):
         with ui.row().classes("items-center gap-3"):
@@ -84,6 +86,10 @@ def index():
             with ui.column().classes("gap-0"):
                 ui.label("Smart Support Concierge").classes("text-xl font-bold text-white tracking-wide")
                 ui.label("Valkey Semantic Cache POC with LangChain & Gemini").classes("text-xs text-slate-400")
+
+        with ui.tabs().classes("text-slate-300 dense") as main_tabs:
+            tab_chat = ui.tab("💬 Support Concierge", icon="chat").classes("text-sm font-semibold")
+            tab_benchmark = ui.tab("📊 Benchmark Suite", icon="speed").classes("text-sm font-semibold")
 
         with ui.row().classes("items-center gap-3"):
             # Valkey status chip
@@ -107,177 +113,181 @@ def index():
                     ui.label(f"AI Offline ({config.vertex_model})")
 
     # -------------------------------------------------------------
-    # MAIN 2-COLUMN LAYOUT
+    # MAIN TAB PANELS
     # -------------------------------------------------------------
-    with ui.row().classes("w-full gap-6 items-start mb-4"):
+    with ui.tab_panels(main_tabs, value=tab_chat).classes("w-full bg-transparent p-4"):
         
-        # ---------------------------------------------------------
-        # LEFT: CHAT INTERFACE & TEST VARIATIONS
-        # ---------------------------------------------------------
-        with ui.column().classes("flex-1 min-w-[500px] gap-4"):
-            with ui.card().classes("w-full bg-slate-800/90 border border-slate-700 p-4 rounded-xl shadow-lg"):
-                with ui.row().classes("items-center justify-between w-full pb-2 border-b border-slate-700"):
-                    with ui.row().classes("items-center gap-2"):
-                        ui.icon("support_agent", size="22px").classes("text-sky-400")
-                        ui.label("CloudNova Support Chat").classes("text-base font-semibold text-white")
-                    ui.label("Ask customer support questions in any phrasing").classes("text-xs text-slate-400")
+        # TAB 1: SUPPORT CHAT CONCIERGE & TELEMETRY HUD
+        with ui.tab_panel(tab_chat).classes("p-0 w-full"):
+            with ui.row().classes("w-full gap-6 items-start mb-4"):
+                
+                # LEFT: CHAT INTERFACE & TEST VARIATIONS
+                with ui.column().classes("flex-1 min-w-[500px] gap-4"):
+                    with ui.card().classes("w-full bg-slate-800/90 border border-slate-700 p-4 rounded-xl shadow-lg"):
+                        with ui.row().classes("items-center justify-between w-full pb-2 border-b border-slate-700"):
+                            with ui.row().classes("items-center gap-2"):
+                                ui.icon("support_agent", size="22px").classes("text-sky-400")
+                                ui.label("CloudNova Support Chat").classes("text-base font-semibold text-white")
+                            ui.label("Ask customer support questions in any phrasing").classes("text-xs text-slate-400")
 
-                # Chat message scroll area
-                chat_scroll = ui.scroll_area().classes("w-full h-[440px] p-2")
-                with chat_scroll:
-                    chat_container = ui.column().classes("w-full gap-3")
-                    with chat_container:
-                        ui.chat_message(
-                            text="Hello! I am your CloudNova AI Support Concierge. Ask me anything about your subscription, billing, API usage, or account settings!",
-                            name="Concierge",
-                            stamp="System",
-                            avatar="https://robohash.org/cloudnova?set=set4",
-                        ).classes("text-sm")
+                        # Chat message scroll area
+                        chat_scroll = ui.scroll_area().classes("w-full h-[440px] p-2")
+                        with chat_scroll:
+                            chat_container = ui.column().classes("w-full gap-3")
+                            with chat_container:
+                                ui.chat_message(
+                                    text="Hello! I am your CloudNova AI Support Concierge. Ask me anything about your subscription, billing, API usage, or account settings!",
+                                    name="Concierge",
+                                    stamp="System",
+                                    avatar="https://robohash.org/cloudnova?set=set4",
+                                ).classes("text-sm")
 
-                # Chat input controls
-                with ui.row().classes("w-full gap-2 pt-3 items-center border-t border-slate-700"):
-                    query_input = ui.input(
-                        placeholder="Type a support question or click a preset below...",
-                    ).props("outlined dense dark autofocus").classes("flex-1 text-sm bg-slate-900 rounded-lg")
+                        # Chat input controls
+                        with ui.row().classes("w-full gap-2 pt-3 items-center border-t border-slate-700"):
+                            query_input = ui.input(
+                                placeholder="Type a support question or click a preset below...",
+                            ).props("outlined dense dark autofocus").classes("flex-1 text-sm bg-slate-900 rounded-lg")
+                            
+                            send_btn = ui.button(
+                                icon="send",
+                                on_click=lambda: run_prompt(query_input.value),
+                            ).props("dense color=primary").classes("px-4 py-2 rounded-lg")
+
+                            query_input.on("keydown.enter", lambda: run_prompt(query_input.value))
+
+                    # PRESET TEST PROMPTS
+                    with ui.card().classes("w-full bg-slate-800/90 border border-slate-700 p-3 rounded-xl shadow-lg gap-2"):
+                        with ui.row().classes("items-center justify-between w-full pb-1 border-b border-slate-700/60"):
+                            with ui.row().classes("items-center gap-1.5"):
+                                ui.icon("science", size="18px").classes("text-amber-400")
+                                ui.label("Quick Semantic Test Variations").classes("text-xs font-semibold text-white")
+                            ui.label("Click to test live matching").classes("text-[10px] text-slate-400")
+
+                        with ui.row().classes("w-full gap-2 flex-wrap"):
+                            for category, prompts in SCENARIOS.items():
+                                with ui.column().classes("flex-1 min-w-[200px] bg-slate-900/70 p-2 rounded-lg border border-slate-700/40 gap-1.5"):
+                                    ui.label(category).classes("text-[10px] font-bold text-slate-300 uppercase tracking-wider")
+                                    for prompt_text in prompts:
+                                        btn = ui.button(
+                                            prompt_text,
+                                            on_click=lambda p=prompt_text: run_prompt(p),
+                                        ).props("no-caps dense outline align=left").classes("w-full text-[10px] text-slate-200 border border-slate-700/70 hover:bg-slate-700/70 hover:border-sky-500/50 transition py-0.5 px-2 text-left leading-snug")
+                                        btn.tooltip(prompt_text)
+
+                # RIGHT: TELEMETRY HUD & VALKEY INSPECTOR
+                with ui.column().classes("w-[420px] gap-4"):
                     
-                    send_btn = ui.button(
-                        icon="send",
-                        on_click=lambda: run_prompt(query_input.value),
-                    ).props("dense color=primary").classes("px-4 py-2 rounded-lg")
+                    # TELEMETRY METRICS HUD
+                    with ui.card().classes("w-full bg-slate-800/90 border border-slate-700 p-4 rounded-xl shadow-lg"):
+                        with ui.row().classes("items-center justify-between w-full pb-2 border-b border-slate-700"):
+                            with ui.row().classes("items-center gap-2"):
+                                ui.icon("analytics", size="22px").classes("text-emerald-400")
+                                ui.label("Live Telemetry HUD").classes("text-base font-semibold text-white")
+                            with ui.row().classes("items-center gap-1"):
+                                ui.label("Valkey HASH").classes("text-[10px] text-emerald-400 bg-emerald-950/70 px-1.5 py-0.5 rounded border border-emerald-700/50 font-mono")
+                                ui.button(
+                                    icon="restart_alt",
+                                    on_click=lambda: reset_telemetry_handler(),
+                                ).props("flat round dense color=slate-400 size=xs").tooltip("Reset telemetry metrics in Valkey HASH")
 
-                    query_input.on("keydown.enter", lambda: run_prompt(query_input.value))
+                        # 4-Grid KPI Counters
+                        with ui.grid(columns=2).classes("w-full gap-3 pt-2"):
+                            with ui.card().classes("bg-slate-900/80 p-3 rounded-lg border border-slate-700/60 items-center text-center"):
+                                total_lbl = ui.label("0").classes("text-2xl font-bold text-white")
+                                ui.label("Total Queries").classes("text-xs text-slate-400")
 
-            # --- PRESET TEST PROMPTS (LEFT OF LEADERBOARD) ---
-            with ui.card().classes("w-full bg-slate-800/90 border border-slate-700 p-3 rounded-xl shadow-lg gap-2"):
-                with ui.row().classes("items-center justify-between w-full pb-1 border-b border-slate-700/60"):
-                    with ui.row().classes("items-center gap-1.5"):
-                        ui.icon("science", size="18px").classes("text-amber-400")
-                        ui.label("Quick Semantic Test Variations").classes("text-xs font-semibold text-white")
-                    ui.label("Click to test live matching").classes("text-[10px] text-slate-400")
+                            with ui.card().classes("bg-slate-900/80 p-3 rounded-lg border border-slate-700/60 items-center text-center"):
+                                hit_ratio_lbl = ui.label("0%").classes("text-2xl font-bold text-emerald-400")
+                                ui.label("Cache Hit Ratio").classes("text-xs text-slate-400")
 
-                with ui.row().classes("w-full gap-2 flex-wrap"):
-                    for category, prompts in SCENARIOS.items():
-                        with ui.column().classes("flex-1 min-w-[200px] bg-slate-900/70 p-2 rounded-lg border border-slate-700/40 gap-1.5"):
-                            ui.label(category).classes("text-[10px] font-bold text-slate-300 uppercase tracking-wider")
-                            for prompt_text in prompts:
-                                btn = ui.button(
-                                    prompt_text,
-                                    on_click=lambda p=prompt_text: run_prompt(p),
-                                ).props("no-caps dense outline align=left").classes("w-full text-[10px] text-slate-200 border border-slate-700/70 hover:bg-slate-700/70 hover:border-sky-500/50 transition py-0.5 px-2 text-left leading-snug")
-                                btn.tooltip(prompt_text)
+                            with ui.card().classes("bg-slate-900/80 p-3 rounded-lg border border-slate-700/60 items-center text-center"):
+                                time_saved_lbl = ui.label("0.0s").classes("text-2xl font-bold text-sky-400")
+                                ui.label("Total Time Saved").classes("text-xs text-slate-400")
 
-        # ---------------------------------------------------------
-        # RIGHT: TELEMETRY HUD & VALKEY INSPECTOR
-        # ---------------------------------------------------------
-        with ui.column().classes("w-[420px] gap-4"):
-            
-            # --- TELEMETRY METRICS HUD ---
-            with ui.card().classes("w-full bg-slate-800/90 border border-slate-700 p-4 rounded-xl shadow-lg"):
-                with ui.row().classes("items-center justify-between w-full pb-2 border-b border-slate-700"):
-                    with ui.row().classes("items-center gap-2"):
-                        ui.icon("analytics", size="22px").classes("text-emerald-400")
-                        ui.label("Live Telemetry HUD").classes("text-base font-semibold text-white")
-                    with ui.row().classes("items-center gap-1"):
-                        ui.label("Valkey HASH").classes("text-[10px] text-emerald-400 bg-emerald-950/70 px-1.5 py-0.5 rounded border border-emerald-700/50 font-mono")
-                        ui.button(
-                            icon="restart_alt",
-                            on_click=lambda: reset_telemetry_handler(),
-                        ).props("flat round dense color=slate-400 size=xs").tooltip("Reset telemetry metrics in Valkey HASH")
+                            with ui.card().classes("bg-slate-900/80 p-3 rounded-lg border border-slate-700/60 items-center text-center"):
+                                tokens_saved_lbl = ui.label("0").classes("text-2xl font-bold text-amber-400")
+                                ui.label("Tokens Saved").classes("text-xs text-slate-400")
 
-                # 4-Grid KPI Counters
-                with ui.grid(columns=2).classes("w-full gap-3 pt-2"):
-                    with ui.card().classes("bg-slate-900/80 p-3 rounded-lg border border-slate-700/60 items-center text-center"):
-                        total_lbl = ui.label("0").classes("text-2xl font-bold text-white")
-                        ui.label("Total Queries").classes("text-xs text-slate-400")
+                        # Last Query Speedup Banner
+                        last_speedup_banner = ui.card().classes("w-full bg-slate-900/90 border border-slate-700 p-3 rounded-lg mt-2 items-center justify-between")
+                        with last_speedup_banner:
+                            with ui.row().classes("items-center justify-between w-full"):
+                                last_status_lbl = ui.label("Ready for queries").classes("text-xs font-semibold text-slate-300")
+                                last_latency_lbl = ui.label("-").classes("text-xs font-mono text-slate-400")
 
-                    with ui.card().classes("bg-slate-900/80 p-3 rounded-lg border border-slate-700/60 items-center text-center"):
-                        hit_ratio_lbl = ui.label("0%").classes("text-2xl font-bold text-emerald-400")
-                        ui.label("Cache Hit Ratio").classes("text-xs text-slate-400")
+                    # SEMANTIC TUNING CONTROLS
+                    with ui.card().classes("w-full bg-slate-800/90 border border-slate-700 p-4 rounded-xl shadow-lg"):
+                        with ui.row().classes("items-center justify-between w-full pb-2 border-b border-slate-700"):
+                            with ui.row().classes("items-center gap-2"):
+                                ui.icon("tune", size="20px").classes("text-indigo-400")
+                                ui.label("Semantic Distance Threshold").classes("text-sm font-semibold text-white")
+                            threshold_val_lbl = ui.label(f"{config.distance_threshold:.2f}").classes("text-sm font-mono font-bold text-indigo-400")
 
-                    with ui.card().classes("bg-slate-900/80 p-3 rounded-lg border border-slate-700/60 items-center text-center"):
-                        time_saved_lbl = ui.label("0.0s").classes("text-2xl font-bold text-sky-400")
-                        ui.label("Total Time Saved").classes("text-xs text-slate-400")
+                        with ui.column().classes("w-full pt-2 gap-1"):
+                            def on_threshold_change(e):
+                                val = round(float(e.value), 2)
+                                threshold_val_lbl.text = f"{val:.2f}"
+                                service.set_threshold(val)
+                                ui.notify(f"Updated semantic distance threshold to {val:.2f}", type="info", position="top-right")
 
-                    with ui.card().classes("bg-slate-900/80 p-3 rounded-lg border border-slate-700/60 items-center text-center"):
-                        tokens_saved_lbl = ui.label("0").classes("text-2xl font-bold text-amber-400")
-                        ui.label("Tokens Saved").classes("text-xs text-slate-400")
+                            ui.slider(
+                                min=0.05,
+                                max=0.50,
+                                step=0.01,
+                                value=config.distance_threshold,
+                                on_change=on_threshold_change,
+                            ).props("label label-always color=indigo dark").classes("w-full")
 
-                # Last Query Speedup Banner
-                last_speedup_banner = ui.card().classes("w-full bg-slate-900/90 border border-slate-700 p-3 rounded-lg mt-2 items-center justify-between")
-                with last_speedup_banner:
-                    with ui.row().classes("items-center justify-between w-full"):
-                        last_status_lbl = ui.label("Ready for queries").classes("text-xs font-semibold text-slate-300")
-                        last_latency_lbl = ui.label("-").classes("text-xs font-mono text-slate-400")
+                            with ui.row().classes("w-full justify-between text-[11px] text-slate-400 px-1"):
+                                ui.label("0.05 (Strict / Exact)")
+                                ui.label("0.20 (Recommended)")
+                                ui.label("0.50 (Loose / Broad)")
 
-            # --- SEMANTIC TUNING CONTROLS ---
-            with ui.card().classes("w-full bg-slate-800/90 border border-slate-700 p-4 rounded-xl shadow-lg"):
-                with ui.row().classes("items-center justify-between w-full pb-2 border-b border-slate-700"):
-                    with ui.row().classes("items-center gap-2"):
-                        ui.icon("tune", size="20px").classes("text-indigo-400")
-                        ui.label("Semantic Distance Threshold").classes("text-sm font-semibold text-white")
-                    threshold_val_lbl = ui.label(f"{config.distance_threshold:.2f}").classes("text-sm font-mono font-bold text-indigo-400")
-
-                with ui.column().classes("w-full pt-2 gap-1"):
-                    def on_threshold_change(e):
-                        val = round(float(e.value), 2)
-                        threshold_val_lbl.text = f"{val:.2f}"
-                        service.set_threshold(val)
-                        ui.notify(f"Updated semantic distance threshold to {val:.2f}", type="info", position="top-right")
-
-                    ui.slider(
-                        min=0.05,
-                        max=0.50,
-                        step=0.01,
-                        value=config.distance_threshold,
-                        on_change=on_threshold_change,
-                    ).props("label label-always color=indigo dark").classes("w-full")
-
-                    with ui.row().classes("w-full justify-between text-[11px] text-slate-400 px-1"):
-                        ui.label("0.05 (Strict / Exact)")
-                        ui.label("0.20 (Recommended)")
-                        ui.label("0.50 (Loose / Broad)")
-
-                with ui.row().classes("w-full justify-between items-center pt-3 border-t border-slate-700 mt-2"):
-                    ui.label("Cache TTL: 3600s").classes("text-xs text-slate-400")
-                    ui.button(
-                        "Purge Cache",
-                        icon="delete_sweep",
-                        on_click=lambda: purge_cache(),
-                    ).props("flat dense color=negative no-caps").classes("text-xs")
-
-            # --- VALKEY EXPLORER & LEADERBOARD ---
-            with ui.card().classes("w-full bg-slate-800/90 border border-slate-700 p-4 rounded-xl shadow-lg"):
-                with ui.row().classes("items-center justify-between w-full pb-2 border-b border-slate-700"):
-                    with ui.tabs().classes("text-slate-300 dense") as valkey_tabs:
-                        tab_leaderboard = ui.tab("🏆 Top Prompts", icon="leaderboard").classes("text-xs font-semibold")
-                        tab_explorer = ui.tab("📦 Cache Explorer", icon="storage").classes("text-xs font-semibold")
-
-                    ui.button(
-                        icon="refresh",
-                        on_click=lambda: refresh_all_valkey_views(),
-                    ).props("flat round dense color=primary").tooltip("Refresh Valkey data")
-
-                with ui.tab_panels(valkey_tabs, value=tab_leaderboard).classes("w-full bg-transparent p-0 pt-2"):
-                    # Panel 1: Top Prompts Leaderboard
-                    with ui.tab_panel(tab_leaderboard).classes("p-0 w-full"):
-                        with ui.row().classes("w-full justify-between items-center pb-1 text-slate-400 text-[11px]"):
-                            ui.label("Ranked by Sorted Set hits • Prompt from HASH")
+                        with ui.row().classes("w-full justify-between items-center pt-3 border-t border-slate-700 mt-2"):
+                            ui.label("Cache TTL: 3600s").classes("text-xs text-slate-400")
                             ui.button(
-                                "Reset Scores",
-                                icon="restart_alt",
-                                on_click=lambda: reset_leaderboard_handler(),
-                            ).props("flat dense color=amber-400 no-caps size=xs").tooltip("Reset hit counters in Valkey")
+                                "Purge Cache",
+                                icon="delete_sweep",
+                                on_click=lambda: purge_cache(),
+                            ).props("flat dense color=negative no-caps").classes("text-xs")
 
-                        leaderboard_container = ui.column().classes("w-full gap-2 pt-1")
+                    # VALKEY EXPLORER & LEADERBOARD
+                    with ui.card().classes("w-full bg-slate-800/90 border border-slate-700 p-4 rounded-xl shadow-lg"):
+                        with ui.row().classes("items-center justify-between w-full pb-2 border-b border-slate-700"):
+                            with ui.tabs().classes("text-slate-300 dense") as valkey_tabs:
+                                tab_leaderboard = ui.tab("🏆 Top Prompts", icon="leaderboard").classes("text-xs font-semibold")
+                                tab_explorer = ui.tab("📦 Cache Explorer", icon="storage").classes("text-xs font-semibold")
 
-                    # Panel 2: Valkey Cache Explorer
-                    with ui.tab_panel(tab_explorer).classes("p-0 w-full"):
-                        with ui.row().classes("w-full justify-between items-center pb-1 text-slate-400 text-[11px]"):
-                            ui.label("Raw HASH keys in Valkey")
-                        cache_table_container = ui.column().classes("w-full gap-2 pt-1")
+                            ui.button(
+                                icon="refresh",
+                                on_click=lambda: refresh_all_valkey_views(),
+                            ).props("flat round dense color=primary").tooltip("Refresh Valkey data")
+
+                        with ui.tab_panels(valkey_tabs, value=tab_leaderboard).classes("w-full bg-transparent p-0 pt-2"):
+                            # Panel 1: Top Prompts Leaderboard
+                            with ui.tab_panel(tab_leaderboard).classes("p-0 w-full"):
+                                with ui.row().classes("w-full justify-between items-center pb-1 text-slate-400 text-[11px]"):
+                                    ui.label("Ranked by Sorted Set hits • Prompt from HASH")
+                                    ui.button(
+                                        "Reset Scores",
+                                        icon="restart_alt",
+                                        on_click=lambda: reset_leaderboard_handler(),
+                                    ).props("flat dense color=amber-400 no-caps size=xs").tooltip("Reset hit counters in Valkey")
+
+                                leaderboard_container = ui.column().classes("w-full gap-2 pt-1")
+
+                            # Panel 2: Valkey Cache Explorer
+                            with ui.tab_panel(tab_explorer).classes("p-0 w-full"):
+                                with ui.row().classes("w-full justify-between items-center pb-1 text-slate-400 text-[11px]"):
+                                    ui.label("Raw HASH keys in Valkey")
+                                cache_table_container = ui.column().classes("w-full gap-2 pt-1")
+
+        # TAB 2: BENCHMARK SUITE
+        with ui.tab_panel(tab_benchmark).classes("p-0 w-full"):
+            render_benchmark_ui()
 
     # -------------------------------------------------------------
-    # HELPER FUNCTIONS
+    # HELPER FUNCTIONS FOR CHAT TAB
     # -------------------------------------------------------------
     def refresh_telemetry():
         t = service.get_telemetry()
@@ -413,7 +423,6 @@ def index():
 
         chat_scroll.scroll_to(percent=1.0)
 
-        # Run query in background thread (service.query automatically persists telemetry to Valkey HASH)
         try:
             res: QueryResult = await run.io_bound(service.query, clean_prompt)
         except Exception as e:
@@ -478,14 +487,17 @@ def index():
         chat_scroll.scroll_to(percent=1.0)
         refresh_all_valkey_views()
 
-    # Initial view population (loads persisted telemetry from Valkey HASH)
+    # Initial view population
     refresh_all_valkey_views()
 
 
 if __name__ in {"__main__", "__mp_main__"}:
+    port = int(os.getenv("PORT", "8080"))
+    host = os.getenv("HOST", "0.0.0.0")
     ui.run(
         title="Smart Support Concierge — Valkey Semantic Cache",
-        port=8080,
+        host=host,
+        port=port,
         dark=True,
         reload=False,
     )
