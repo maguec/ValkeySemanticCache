@@ -27,8 +27,8 @@ locals {
   all_connections = flatten([
     for ep in google_memorystore_instance.valkey_instance.endpoints : [
       for conn in ep.connections : concat(
-        [for psc in conn.psc_auto_connection : psc],
-        [for psc in conn.psc_connection : psc]
+        try(conn.psc_auto_connection, []),
+        try(conn.psc_connection, [])
       )
     ]
   ])
