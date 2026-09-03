@@ -13,6 +13,11 @@ terraform {
   }
 }
 
+provider "google" {
+  user_project_override = true
+  billing_project       = var.project_id
+}
+
 variable "project_id" {
   description = "project id in which demo deploy"
 }
